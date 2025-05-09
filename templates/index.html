@@ -1,0 +1,938 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hyperliquid Trade History</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/datatables@1.10.18/media/css/jquery.dataTables.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #f8f9fa;
+            padding: 20px;
+        }
+        .card {
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+        }
+        .card-header {
+            background-color: #007bff;
+            color: white;
+            border-radius: 10px 10px 0 0 !important;
+        }
+        .table {
+            margin-bottom: 0;
+        }
+        .buy {
+            color: #28a745;
+        }
+        .sell {
+            color: #dc3545;
+        }
+        #tradeTable {
+            width: 100% !important;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="card mb-4">
+            <div class="card-header">Asset Positions & Account Summary</div>
+            <div class="card-body">
+                <form id="userStateForm" class="row g-3 mb-3">
+                    <div class="col-auto">
+                        <input type="text" class="form-control" id="walletAddress" placeholder="Enter wallet address">
+                    </div>
+                    <div class="col-auto">
+                        <button type="submit" class="btn btn-primary mb-3">Lookup</button>
+                    </div>
+                </form>
+                <div id="accountSummary" class="mb-3" style="display:none;"></div>
+                <div id="positionsTableContainer" style="display:none;">
+                    <table class="table table-bordered table-hover align-middle" id="positionsTable">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Coin</th>
+                                <th>Entry Price</th>
+                                <th>Leverage</th>
+                                <th>Position Value</th>
+                                <th>Margin Used</th>
+                                <th>Size</th>
+                                <th>Unrealized PnL</th>
+                                <th>ROE</th>
+                                <th>Funding (All/SinceChange/SinceOpen)</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+                <div id="userStateError" class="alert alert-danger" style="display:none;"></div>
+            </div>
+        </div>
+        <div class="card mb-4">
+            <div class="card-header">Trade History Lookup</div>
+            <div class="card-body">
+                <div class="row g-3 mb-2">
+                    <div class="col-auto">
+                        <select class="form-select" id="favoriteDropdown">
+                            <option value="">選擇收藏地址（依標籤）</option>
+                        </select>
+                    </div>
+                    <div class="col-auto">
+                        <input type="text" class="form-control" id="filterCoin" placeholder="搜尋幣種（如ETH）">
+                    </div>
+                    <div class="col-auto">
+                        <select class="form-select" id="sortDropdown">
+                            <option value="timestamp">時間</option>
+                            <option value="sz">Size</option>
+                            <option value="px">Price</option>
+                            <option value="closedPnl">盈利</option>
+                        </select>
+                    </div>
+                    <div class="col-auto">
+                        <input type="number" class="form-control" id="minSize" placeholder="最小Size">
+                    </div>
+                    <div class="col-auto">
+                        <button type="button" class="btn btn-secondary" id="applyFilterBtn">篩選/排序</button>
+                    </div>
+                </div>
+                <form id="tradeHistoryForm" class="row g-3">
+                    <div class="col-auto">
+                        <input type="text" class="form-control" id="tradeWalletAddress" placeholder="Enter wallet address">
+                    </div>
+                    <div class="col-auto">
+                        <input type="date" class="form-control" id="tradeStartDate" placeholder="Start date">
+                    </div>
+                    <div class="col-auto">
+                        <input type="date" class="form-control" id="tradeEndDate" placeholder="End date">
+                    </div>
+                    <div class="col-auto">
+                        <button type="submit" class="btn btn-primary mb-3">Lookup</button>
+                    </div>
+                </form>
+                <div class="col-auto">
+                    <button type="button" class="btn btn-warning mb-3" id="favoriteAddressBtn">收藏此地址</button>
+                </div>
+                <div id="tradeHistoryTableContainer" style="display:none;">
+                    <table id="lookupTradeTable" class="table table-striped">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Coin</th>
+                                <th>動作</th>
+                                <th>Size</th>
+                                <th>Price</th>
+                                <th>Closed PnL</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                    <nav>
+                        <ul class="pagination" id="tradePagination"></ul>
+                    </nav>
+                </div>
+            </div>
+        </div>
+       
+        <div class="card mb-4">
+            <div class="card-header bg-info text-white">Cumulative PnL Over Time</div>
+            <div class="card-body">
+                <form id="pnlChartForm" class="row g-3 mb-3">
+                    <div class="col-auto">
+                        <input type="text" class="form-control" id="pnlWalletAddress" placeholder="Enter wallet address">
+                    </div>
+                    <div class="col-auto">
+                        <button type="submit" class="btn btn-info text-white">Plot</button>
+                    </div>
+                </form>
+                <div id="overallStats" class="row mb-4" style="display: none;">
+                    <div class="col-md-3">
+                        <div class="card bg-light">
+                            <div class="card-body">
+                                <h6 class="card-title">总累计盈亏</h6>
+                                <h4 class="card-text" id="totalPnl">-</h4>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card bg-light">
+                            <div class="card-body">
+                                <h6 class="card-title">总体胜率</h6>
+                                <h4 class="card-text" id="overallWinrate">-</h4>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card bg-light">
+                            <div class="card-body">
+                                <h6 class="card-title">总交易数</h6>
+                                <h4 class="card-text" id="totalTrades">-</h4>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card bg-light">
+                            <div class="card-body">
+                                <h6 class="card-title">盈利交易数</h6>
+                                <h4 class="card-text" id="winningTrades">-</h4>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="row mb-3">
+                    <div class="col-auto">
+                        <label for="pnlStatSelect" class="form-label">Chart Stat:</label>
+                        <select id="pnlStatSelect" class="form-select">
+                            <option value="winrate">Winrate (%)</option>
+                            <option value="num_trades">Number of Trades</option>
+                        </select>
+                    </div>
+                    <div class="col-auto">
+                        <label for="pnlTimeframeSelect" class="form-label">Time Frame:</label>
+                        <select id="pnlTimeframeSelect" class="form-select">
+                            <option value="all">All Time</option>
+                            <option value="90d">90D</option>
+                            <option value="30d">30D</option>
+                            <option value="7d">7D</option>
+                        </select>
+                    </div>
+                </div>
+                <canvas id="pnlChart" height="100"></canvas>
+                <div class="table-responsive mt-4">
+                    <table class="table table-bordered table-hover align-middle" id="pnlSummaryTable">
+                        <thead class="table-info">
+                            <tr>
+                                <th>Date</th>
+                                <th># Trades</th>
+                                <th>Winrate (%)</th>
+                                <th>Coins Traded</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="card mb-4">
+            <div class="card-header bg-success text-white">实时盈亏追踪</div>
+            <div class="card-body">
+                <form id="trackPnlForm" class="row g-3 mb-3">
+                    <div class="col-auto">
+                        <input type="text" class="form-control" id="trackPnlAddress" placeholder="输入钱包地址">
+                    </div>
+                    <div class="col-auto">
+                        <button type="submit" class="btn btn-success text-white">开始追踪</button>
+                    </div>
+                </form>
+                <div id="pnlTrackingStats" class="row mb-4" style="display: none;">
+                    <div class="col-md-3">
+                        <div class="card bg-light">
+                            <div class="card-body">
+                                <h6 class="card-title">已实现盈亏</h6>
+                                <h4 class="card-text" id="realizedPnl">-</h4>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card bg-light">
+                            <div class="card-body">
+                                <h6 class="card-title">资金费率盈亏</h6>
+                                <h4 class="card-text" id="fundingPnl">-</h4>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card bg-light">
+                            <div class="card-body">
+                                <h6 class="card-title">未实现盈亏
+                                    <button id="refreshUnrealizedBtn" type="button" class="btn btn-link p-0 ms-2" title="刷新未实现盈亏">
+                                        <span class="spinner-border spinner-border-sm d-none" id="unrealizedLoading" role="status" aria-hidden="true"></span>
+                                        <svg id="unrealizedRefreshIcon" width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                            <path d="M16.3788 6.20698C15.1885 5.25459 13.7434 4.5 12 4.5C7.85787 4.5 4.5 7.85786 4.5 12C4.5 16.1421 7.85787 19.5 12 19.5C15.2549 19.5 18.028 17.4254 19.0646 14.5256C19.2505 14.0055 19.775 13.6568 20.3153 13.7713L21.2935 13.9787C21.8338 14.0932 22.1836 14.6262 22.0179 15.1531C20.6787 19.4112 16.7016 22.5 12 22.5C6.20101 22.5 1.5 17.799 1.5 12C1.5 6.20101 6.20101 1.5 12 1.5C14.7835 1.5 16.9516 2.76847 18.5112 4.0746L20.2929 2.29289C20.5789 2.00689 21.009 1.92134 21.3827 2.07612C21.7564 2.2309 22 2.59554 22 3V8.5C22 9.05228 21.5523 9.5 21 9.5H15.5C15.0956 9.5 14.7309 9.25636 14.5761 8.88268C14.4214 8.50901 14.5069 8.07889 14.7929 7.79289L16.3788 6.20698Z" fill="#000"/>
+                                        </svg>
+                                    </button>
+                                </h6>
+                                <h4 class="card-text" id="unrealizedPnl">-</h4>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card bg-light">
+                            <div class="card-body">
+                                <h6 class="card-title">总累计盈亏</h6>
+                                <h4 class="card-text" id="totalPnl">-</h4>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    <div class="modal fade" id="favoriteModal" tabindex="-1" aria-labelledby="favoriteModalLabel" aria-hidden="true">
+      <div class="modal-dialog">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="favoriteModalLabel">收藏地址</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <div class="mb-3">
+              <label for="favoriteTag" class="form-label">標籤</label>
+              <input type="text" class="form-control" id="favoriteTag" placeholder="輸入標籤">
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+            <button type="button" class="btn btn-primary" id="favoriteSaveBtn">確認收藏</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/datatables@1.10.18/media/js/jquery.dataTables.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        let lastPnlData = [];
+        let pnlChart = null;
+        let lastTradeHistory = [];
+        let pnlTrackingInterval = null;
+        let unrealizedAutoInterval = null;
+        let lastTrackPnlAddress = '';
+        $(document).ready(function() {
+            const socket = io();
+            const table = $('#tradeTable').DataTable({
+                order: [[0, 'desc']],
+                pageLength: 25,
+                columns: [
+                    { data: 'timestamp' },
+                    { data: 'coin' },
+                    { 
+                        data: 'side',
+                        render: function(data) {
+                            return `<span class="${data.toLowerCase()}">${data}</span>`;
+                        }
+                    },
+                    { data: 'size' },
+                    { data: 'price' }
+                ]
+            });
+
+            // Load initial data
+            fetch('/api/trades')
+                .then(response => response.json())
+                .then(data => {
+                    table.clear();
+                    table.rows.add(data);
+                    table.draw();
+                });
+
+            // Listen for new trades
+            socket.on('new_trade', function(trade) {
+                table.row.add(trade).draw(false);
+            });
+
+            $('#userStateForm').on('submit', function(e) {
+                e.preventDefault();
+                const address = $('#walletAddress').val();
+                $('#userStateError').hide();
+                $('#accountSummary').hide();
+                $('#positionsTableContainer').hide();
+                if (!address) return;
+                fetch(`/api/user_state?address=${address}`)
+                  .then(res => res.json())
+                  .then(data => {
+                    if (data.error) {
+                      $('#userStateError').text(data.error).show();
+                      return;
+                    }
+                    $('#accountSummary').html(renderAccountSummary(data)).show();
+                    renderPositionsTable(data.assetPositions);
+                    $('#positionsTableContainer').show();
+                  });
+            });
+
+            $('#lookupTradeTable').DataTable({
+                order: [[0, 'desc']],
+                pageLength: 20,
+                searching: false,
+                lengthChange: false,
+                columns: [
+                    { 
+                        data: 'timestamp',
+                        render: function(data) {
+                            return data;
+                        }
+                    },
+                    { data: 'coin' },
+                    { data: 'action' },
+                    { data: 'sz' },
+                    { data: 'px' },
+                    { data: 'closedPnl' }
+                ]
+            });
+
+        
+            function filterByTimeframe(data, timeframe) {
+                if (timeframe === 'all') return data;
+                const now = new Date();
+                let cutoff = null;
+                if (timeframe === '7d') cutoff = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+                if (timeframe === '30d') cutoff = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+                if (timeframe === '90d') cutoff = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+                return data.filter(row => new Date(row.date) >= cutoff);
+            }
+            function renderPnlChart(data, stat) {
+                const labels = data.map(d => d.date);
+                const statData = data.map(d => d[stat]);
+                const statLabel = {
+                    winrate: 'Winrate (%)',
+                    num_trades: 'Number of Trades'
+                }[stat];
+                const ctx = document.getElementById('pnlChart').getContext('2d');
+                if (pnlChart) pnlChart.destroy();
+                pnlChart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: statLabel,
+                            data: statData,
+                            borderColor: 'green',
+                            backgroundColor: 'rgba(0,128,0,0.1)',
+                            fill: true,
+                            tension: 0.2
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        scales: {
+                            x: { title: { display: true, text: 'Date' }},
+                            y: { title: { display: true, text: statLabel }}
+                        }
+                    }
+                });
+            }
+            function updatePnlDisplay() {
+                const stat = $('#pnlStatSelect').val();
+                const timeframe = $('#pnlTimeframeSelect').val();
+                const filtered = filterByTimeframe(lastPnlData.daily_summary, timeframe);
+                renderPnlSummaryTable(filtered);
+                renderPnlChart(filtered, stat);
+                
+                if (lastPnlData.overall_stats) {
+                    $('#overallStats').show();
+                    $('#totalPnl').text(formatCurrency(lastPnlData.overall_stats.total_pnl));
+                    $('#overallWinrate').text(lastPnlData.overall_stats.overall_winrate.toFixed(2) + '%');
+                    $('#totalTrades').text(lastPnlData.overall_stats.total_trades);
+                    $('#winningTrades').text(lastPnlData.overall_stats.winning_trades);
+                }
+            }
+            function renderPnlSummaryTable(data) {
+                const tbody = $('#pnlSummaryTable tbody');
+                tbody.empty();
+                if (!data || data.length === 0) {
+                    tbody.append('<tr><td colspan="4" class="text-center">No data</td></tr>');
+                    return;
+                }
+                data.forEach(row => {
+                    tbody.append(`
+                        <tr>
+                            <td>${row.date}</td>
+                            <td>${row.num_trades}</td>
+                            <td>${row.winrate}</td>
+                            <td>${Array.isArray(row.coins_traded) ? row.coins_traded.join(', ') : ''}</td>
+                        </tr>
+                    `);
+                });
+            }
+            $('#pnlChartForm').on('submit', function(e) {
+                e.preventDefault();
+                const address = $('#pnlWalletAddress').val();
+                if (!address) return;
+                fetch(`/api/pnl_timeseries?address=${address}`)
+                    .then(res => res.json())
+                    .then(data => {
+                        if (!data || data.length === 0) {
+                            alert('No data found for this wallet.');
+                            return;
+                        }
+                        if (data.error) {
+                            alert(data.error);
+                            return;
+                        }
+                        lastPnlData = data;
+                        updatePnlDisplay();
+                    });
+            });
+            $('#pnlStatSelect, #pnlTimeframeSelect').on('change', function() {
+                if (lastPnlData && lastPnlData.length > 0) {
+                    updatePnlDisplay();
+                }
+            });
+
+            function mergeTrades(trades) {
+                if (!trades || trades.length === 0) return [];
+                // 先按coin, action, timestamp排序
+                trades = trades.slice().sort((a, b) => {
+                    if (a.coin !== b.coin) return a.coin.localeCompare(b.coin);
+                    if (a.action !== b.action) return a.action.localeCompare(b.action);
+                    return new Date(a.timestamp) - new Date(b.timestamp);
+                });
+                const merged = [];
+                let last = null;
+                for (let t of trades) {
+                    const tTime = new Date(t.timestamp).getTime();
+                    if (
+                        last &&
+                        last.coin === t.coin &&
+                        last.action === t.action &&
+                        (tTime - last._lastTime) <= 5 * 60 * 1000 // 5分鐘
+                    ) {
+                        // 合併
+                        last.sz = Number(last.sz) + Number(t.sz);
+                        last.closedPnl = Number(last.closedPnl) + Number(t.closedPnl);
+                        last._lastTime = tTime; // 更新最後一筆時間
+                        last._merged = true;
+                    } else {
+                        // 新的一組
+                        last = { ...t, _lastTime: tTime, _merged: false };
+                        merged.push(last);
+                    }
+                }
+                // 移除輔助欄位
+                merged.forEach(t => { delete t._lastTime; });
+                return merged;
+            }
+            function renderTradeHistoryTable(trades) {
+                lastTradeHistory = trades;
+                // 先根據dir欄位補action
+                trades.forEach(t => {
+                    let action = '';
+                    if (t.dir === 'Open Long') action = '開多';
+                    else if (t.dir === 'Close Long') action = '平多';
+                    else if (t.dir === 'Open Short') action = '開空';
+                    else if (t.dir === 'Close Short') action = '平空';
+                    else action = t.dir || '';
+                    t.action = action;
+                    t.size = t.sz !== undefined ? t.sz : t.size;
+                    t.price = t.px !== undefined ? t.px : t.price;
+                });
+                // 合併
+                const mergedTrades = mergeTrades(trades);
+                // 標記合併
+                mergedTrades.forEach(t => {
+                    if (t._merged) t.action = t.action + '（合併）';
+                });
+                const table = $('#lookupTradeTable').DataTable();
+                table.clear();
+                table.rows.add(mergedTrades);
+                table.draw();
+            }
+            function updateTradePagination(page, pages) {
+                let html = '';
+                for (let i = 1; i <= pages; i++) {
+                    html += `<li class="page-item${i === page ? ' active' : ''}"><a class="page-link" href="#" data-page="${i}">${i}</a></li>`;
+                }
+                $('#tradePagination').html(html);
+            }
+            let currentTradeAddress = '';
+            let currentTradePage = 1;
+            $('#tradeHistoryForm').on('submit', function(e) {
+                e.preventDefault();
+                currentTradeAddress = $('#tradeWalletAddress').val();
+                currentTradePage = 1;
+                fetchTradeHistory(currentTradeAddress, currentTradePage);
+            });
+            $('#tradePagination').on('click', 'a', function(e) {
+                e.preventDefault();
+                const page = parseInt($(this).data('page'));
+                if (page !== currentTradePage) {
+                    currentTradePage = page;
+                    fetchTradeHistory(currentTradeAddress, currentTradePage);
+                }
+            });
+            function fetchTradeHistory(address, page) {
+                if (!address) return;
+                $('#tradeHistoryTableContainer').show();
+                const startDate = $('#tradeStartDate').val();
+                const endDate = $('#tradeEndDate').val();
+                let start_time = '';
+                let end_time = '';
+                if (startDate) {
+                    start_time = new Date(startDate).setHours(0,0,0,0);
+                }
+                if (endDate) {
+                    end_time = new Date(endDate).setHours(23,59,59,999);
+                }
+                if (startDate && !endDate) {
+                    end_time = new Date(startDate).setHours(23,59,59,999);
+                }
+                if (!startDate && endDate) {
+                    start_time = new Date(endDate).setHours(0,0,0,0);
+                }
+                let url = `/api/trades_by_address?address=${address}&page=${page}`;
+                if (start_time) url += `&start_time=${start_time}`;
+                if (end_time) url += `&end_time=${end_time}`;
+                fetch(url)
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.error) {
+                            $('#lookupTradeTable').DataTable().clear().draw();
+                            $('#tradePagination').html('');
+                            alert(data.error);
+                            return;
+                        }
+                        data.trades.forEach(t => {
+                            if (t.side === 'A') {
+                                t.side = '<span class="text-success fw-bold">Buy</span>';
+                            } else if (t.side === 'B') {
+                                t.side = '<span class="text-danger fw-bold">Sell</span>';
+                            }
+                        });
+                        renderTradeHistoryTable(data.trades);
+                        updateTradePagination(data.page, data.pages);
+                    });
+            }
+            function formatLeaderboardROE(val) {
+                if (val === null || val === undefined) return '-';
+                return (val * 100).toFixed(2) + '%';
+            }
+            function formatLeaderboardPnL(val) {
+                if (val === null || val === undefined) return '-';
+                return '$' + Number(val).toLocaleString(undefined, {maximumFractionDigits: 2});
+            }
+            $('#leaderboardForm').on('submit', function(e) {
+                e.preventDefault();
+                const addresses = $('#leaderboardAddresses').val().split(/\s+/).filter(x => x.length > 0);
+                if (addresses.length === 0) return;
+                $('#leaderboardLoading').show();
+                $('#leaderboardTableContainer').hide();
+                fetch('/api/leaderboard', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ addresses })
+                })
+                    .then(res => res.json())
+                    .then(data => {
+                        $('#leaderboardLoading').hide();
+                        const tbody = $('#leaderboardTable tbody');
+                        tbody.empty();
+                        if (!data.leaderboard || data.leaderboard.length === 0) {
+                            tbody.append('<tr><td colspan="6" class="text-center">No smart money found in this batch.</td></tr>');
+                        } else {
+                            data.leaderboard.forEach((row, idx) => {
+                                tbody.append(`
+                                    <tr${idx === 0 ? ' class="table-warning fw-bold"' : ''}>
+                                        <td>${idx + 1}</td>
+                                        <td><code>${row.address}</code></td>
+                                        <td>${formatLeaderboardROE(row.roe_30d)}</td>
+                                        <td>${formatLeaderboardPnL(row.pnl_30d)}</td>
+                                        <td>${formatLeaderboardROE(row.roe_90d)}</td>
+                                        <td>${formatLeaderboardPnL(row.pnl_90d)}</td>
+                                    </tr>
+                                `);
+                            });
+                        }
+                        $('#leaderboardTableContainer').show();
+                    });
+            });
+            let dbTradeCurrentPage = 1;
+            let dbTradeTotalPages = 1;
+            let dbTradeLastQuery = {};
+
+            function renderDbTradeTable(trades) {
+                const tbody = $('#dbTradeTable tbody');
+                tbody.empty();
+                if (!trades || trades.length === 0) {
+                    tbody.append('<tr><td colspan="7" class="text-center">No data</td></tr>');
+                    return;
+                }
+                trades.forEach(row => {
+                    tbody.append(`
+                        <tr>
+                            <td>${row.timestamp}</td>
+                            <td>${row.coin}</td>
+                            <td>${row.side}</td>
+                            <td>${row.sz}</td>
+                            <td>${row.px}</td>
+                            <td>${row.dir}</td>
+                            <td>${row.closedPnl}</td>
+                        </tr>
+                    `);
+                });
+            }
+
+            function renderDbTradePagination(page, pages) {
+                let html = '';
+                for (let i = 1; i <= pages; i++) {
+                    html += `<li class="page-item${i === page ? ' active' : ''}"><a class="page-link" href="#" data-page="${i}">${i}</a></li>`;
+                }
+                $('#dbTradePagination').html(html);
+            }
+
+            function fetchDbTradeHistory(address, days, page) {
+                $('#dbTradeTableContainer').show();
+                $.get(`/api/trades_by_address_db?address=${address}&days=${days}&page=${page}&page_size=20`, function(data) {
+                    if (data.error) {
+                        $('#dbTradeTable tbody').html('<tr><td colspan="7" class="text-center text-danger">' + data.error + '</td></tr>');
+                        $('#dbTradePagination').html('');
+                        return;
+                    }
+                    renderDbTradeTable(data.trades);
+                    renderDbTradePagination(data.page, data.pages);
+                    dbTradeCurrentPage = data.page;
+                    dbTradeTotalPages = data.pages;
+                });
+            }
+
+            $('#dbTradeForm').on('submit', function(e) {
+                e.preventDefault();
+                const address = $('#dbTradeAddress').val();
+                const days = $('#dbTradeDays').val();
+                if (!address) return;
+                dbTradeLastQuery = { address, days };
+                fetchDbTradeHistory(address, days, 1);
+            });
+
+            $('#dbTradePagination').on('click', 'a', function(e) {
+                e.preventDefault();
+                const page = parseInt($(this).data('page'));
+                if (page !== dbTradeCurrentPage && dbTradeLastQuery.address) {
+                    fetchDbTradeHistory(dbTradeLastQuery.address, dbTradeLastQuery.days, page);
+                }
+            });
+
+            $('#favoriteAddressBtn').on('click', function() {
+                $('#favoriteModal').modal('show');
+            });
+
+            $('#favoriteSaveBtn').on('click', function() {
+                const tag = $('#favoriteTag').val();
+                const address = $('#tradeWalletAddress').val();
+                if (!address || lastTradeHistory.length === 0) {
+                    alert('請先查詢地址並確保有交易紀錄');
+                    return;
+                }
+                // 只計算已平倉單（closedPnl 不為 0）
+                const closedTrades = lastTradeHistory.filter(t => t.closedPnl !== undefined && t.closedPnl !== null && Number(t.closedPnl) !== 0);
+                const winTrades = closedTrades.filter(t => Number(t.closedPnl) > 0).length;
+                const winrate = closedTrades.length > 0 ? (winTrades / closedTrades.length) * 100 : 0;
+                // 前5常交易幣種
+                const coinCount = {};
+                lastTradeHistory.forEach(t => {
+                    if (!coinCount[t.coin]) coinCount[t.coin] = 0;
+                    coinCount[t.coin]++;
+                });
+                const top_coins = Object.entries(coinCount).sort((a,b)=>b[1]-a[1]).slice(0,5).map(x=>x[0]);
+                // 前5單盈利(%)
+                const profitList = lastTradeHistory.map(t => {
+                    const sz = Number(t.sz);
+                    const px = Number(t.px);
+                    const closedPnl = Number(t.closedPnl);
+                    const cost = Math.abs(sz * px);
+                    const profitPct = cost > 0 ? (closedPnl / cost) * 100 : 0;
+                    return profitPct;
+                }).sort((a,b)=>b-a).slice(0,5);
+                // 發送到後端
+                fetch('/api/favorite_address', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        address,
+                        winrate: winrate.toFixed(2),
+                        tag,
+                        top_coins,
+                        top_profits: profitList.map(x=>x.toFixed(2))
+                    })
+                }).then(res=>res.json()).then(data=>{
+                    if (data.success) {
+                        alert('收藏成功！');
+                        $('#favoriteModal').modal('hide');
+                    } else {
+                        alert('收藏失敗');
+                    }
+                });
+            });
+
+            function filterAndSortTradeHistory() {
+                let filtered = lastTradeHistory.slice();
+                const coin = $('#filterCoin').val().trim().toUpperCase();
+                const minSize = parseFloat($('#minSize').val());
+                const sortKey = $('#sortDropdown').val();
+                // 幣種過濾
+                if (coin) {
+                    filtered = filtered.filter(t => (t.coin || '').toUpperCase() === coin);
+                }
+                // size過濾
+                if (!isNaN(minSize)) {
+                    filtered = filtered.filter(t => Number(t.sz) >= minSize);
+                }
+                // 排序
+                filtered.sort((a, b) => {
+                    if (sortKey === 'timestamp') {
+                        return new Date(b.timestamp) - new Date(a.timestamp);
+                    }
+                    return Number(b[sortKey]) - Number(a[sortKey]);
+                });
+                renderTradeHistoryTable(filtered);
+            }
+            $('#applyFilterBtn').on('click', filterAndSortTradeHistory);
+
+            function loadFavoriteAddresses() {
+                fetch('/api/favorite_addresses')
+                  .then(res => res.json())
+                  .then(data => {
+                    const dropdown = $('#favoriteDropdown');
+                    dropdown.empty();
+                    dropdown.append('<option value="">選擇收藏地址（依標籤）</option>');
+                    data.forEach(item => {
+                      dropdown.append(`<option value="${item.address}">${item.tag} (${item.address})</option>`);
+                    });
+                  });
+            }
+            $(document).ready(function() {
+                loadFavoriteAddresses();
+                $('#favoriteDropdown').on('change', function() {
+                    const addr = $(this).val();
+                    if (addr) {
+                        $('#tradeWalletAddress').val(addr);
+                        $('#tradeHistoryForm').submit();
+                    }
+                });
+            });
+
+            $('#trackPnlForm').on('submit', function(e) {
+                e.preventDefault();
+                const address = $('#trackPnlAddress').val();
+                if (!address) return;
+                lastTrackPnlAddress = address;
+                // 清除之前的定时器
+                if (pnlTrackingInterval) {
+                    clearInterval(pnlTrackingInterval);
+                }
+                if (unrealizedAutoInterval) {
+                    clearInterval(unrealizedAutoInterval);
+                }
+                // 立即获取一次数据
+                updatePnlTracking(address);
+                // 设置主體每30秒更新
+                pnlTrackingInterval = setInterval(() => {
+                    updatePnlTracking(address);
+                }, 30000);
+                // 设置未实现盈亏每15秒自动更新
+                unrealizedAutoInterval = setInterval(() => {
+                    updateUnrealizedPnl(address);
+                }, 15000);
+            });
+            
+            $('#refreshUnrealizedBtn').on('click', function() {
+                if (!lastTrackPnlAddress) return;
+                $('#unrealizedRefreshIcon').addClass('d-none');
+                $('#unrealizedLoading').removeClass('d-none');
+                updateUnrealizedPnl(lastTrackPnlAddress, function() {
+                    $('#unrealizedLoading').addClass('d-none');
+                    $('#unrealizedRefreshIcon').removeClass('d-none');
+                });
+            });
+            
+            function updatePnlTracking(address) {
+                fetch(`/api/track_pnl?address=${address}`)
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.error) {
+                            alert(data.error);
+                            return;
+                        }
+                        
+                        $('#pnlTrackingStats').show();
+                        $('#realizedPnl').text(formatCurrency(data.realized_pnl));
+                        $('#fundingPnl').text(formatCurrency(data.funding_pnl));
+                        $('#unrealizedPnl').text(formatCurrency(data.unrealized_pnl));
+                        $('#totalPnl').text(formatCurrency(data.total_cumulative_pnl));
+                        
+                        // 根据盈亏设置颜色
+                        const totalPnl = data.total_cumulative_pnl;
+                        $('#totalPnl').removeClass('text-success text-danger')
+                            .addClass(totalPnl >= 0 ? 'text-success' : 'text-danger');
+                    })
+                    .catch(error => {
+                        console.error('Error fetching PnL data:', error);
+                    });
+            }
+            function updateUnrealizedPnl(address, cb) {
+                fetch(`/api/track_pnl?address=${address}`)
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.error) {
+                            alert(data.error);
+                            return;
+                        }
+                        $('#unrealizedPnl').text(formatCurrency(data.unrealized_pnl));
+                    })
+                    .finally(() => {
+                        if (cb) cb();
+                    });
+            }
+        });
+
+        function formatCurrency(val, digits=2) {
+            if (val === null || val === undefined) return '-';
+            return Number(val).toLocaleString(undefined, {maximumFractionDigits: digits});
+        }
+        function formatPercent(val, digits=2) {
+            if (val === null || val === undefined) return '-';
+            return (Number(val) * 100).toFixed(digits) + '%';
+        }
+        function formatMalaysiaTime(utcString) {
+            // Accepts 'YYYY-MM-DD HH:mm:ss' in UTC, returns Malaysia time string
+            if (!utcString) return '-';
+            const date = new Date(utcString.replace(' ', 'T') + 'Z');
+            return date.toLocaleString('en-MY', { timeZone: 'Asia/Kuala_Lumpur' });
+        }
+        function renderAccountSummary(data) {
+            if (!data) return '';
+            return `
+                <div class="row g-3">
+                    <div class="col-md-3"><strong>Account Value:</strong> $${formatCurrency(data.marginSummary?.accountValue)}</div>
+                    <div class="col-md-3"><strong>Withdrawable:</strong> $${formatCurrency(data.withdrawable)}</div>
+                    <div class="col-md-3"><strong>Total Margin Used:</strong> $${formatCurrency(data.marginSummary?.totalMarginUsed)}</div>
+                    <div class="col-md-3"><strong>Total Position:</strong> $${formatCurrency(data.marginSummary?.totalNtlPos)}</div>
+                </div>
+            `;
+        }
+        function renderPositionsTable(assetPositions) {
+            const tbody = $('#positionsTable tbody');
+            tbody.empty();
+            if (!assetPositions || assetPositions.length === 0) {
+                tbody.append('<tr><td colspan="9" class="text-center">No open positions</td></tr>');
+                return;
+            }
+            assetPositions.forEach(pos => {
+                const p = pos.position;
+                tbody.append(`
+                    <tr>
+                        <td><strong>${p.coin}</strong></td>
+                        <td>${formatCurrency(p.entryPx, 6)}</td>
+                        <td>${p.leverage?.type ? p.leverage.type.charAt(0).toUpperCase() + p.leverage.type.slice(1) : ''} x${p.leverage?.value || ''}</td>
+                        <td>$${formatCurrency(p.positionValue)}</td>
+                        <td>$${formatCurrency(p.marginUsed)}</td>
+                        <td>${formatCurrency(p.szi, 4)}</td>
+                        <td class="${Number(p.unrealizedPnl) >= 0 ? 'text-success' : 'text-danger'}">$${formatCurrency(p.unrealizedPnl)}</td>
+                        <td>${formatPercent(p.returnOnEquity, 2)}</td>
+                        <td>
+                            <span title="All Time">${formatCurrency(p.cumFunding?.allTime, 6)}</span> /
+                            <span title="Since Change">${formatCurrency(p.cumFunding?.sinceChange, 6)}</span> /
+                            <span title="Since Open">${formatCurrency(p.cumFunding?.sinceOpen, 6)}</span>
+                        </td>
+                    </tr>
+                `);
+            });
+        }
+    </script>
+</body>
+</html> 
