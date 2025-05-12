@@ -134,6 +134,14 @@
                     </nav>
                 </div>
                 <div class="mt-4">
+                    <div class="row mb-3">
+                        <div class="col-auto">
+                            <label for="coinSelect" class="form-label">選擇幣種：</label>
+                            <select class="form-select" id="coinSelect">
+                                <option value="">請選擇幣種</option>
+                            </select>
+                        </div>
+                    </div>
                     <h6>幣價歷史走勢圖</h6>
                     <canvas id="coinPriceChart" height="100"></canvas>
                 </div>
@@ -311,6 +319,23 @@
         let unrealizedAutoInterval = null;
         let lastTrackPnlAddress = '';
         let coinPriceChart = null;
+
+        function renderTradeHistoryTable(trades) {
+            lastTradeHistory = trades;
+            const table = $('#lookupTradeTable').DataTable();
+            table.clear();
+            table.rows.add(trades);
+            table.draw();
+        }
+
+        function updateTradePagination(page, pages) {
+            let html = '';
+            for (let i = 1; i <= pages; i++) {
+                html += `<li class="page-item${i === page ? ' active' : ''}"><a class="page-link" href="#" data-page="${i}">${i}</a></li>`;
+            }
+            $('#tradePagination').html(html);
+        }
+
         // 幣種ID對應表（可擴充）
         const coinIdMap = {
             'ETH': 'ethereum',
@@ -329,12 +354,25 @@
             'TRX': 'tron',
             'PEPE': 'pepe',
             'WIF': 'dogwifcoin',
-            // ...可自行擴充
+            'DYDX': 'dydx-chain',
+            'APT': 'aptos',
+            'FET': 'fetch-ai',
+            'ZK': 'zkfair',      
+            'ATOM': 'cosmos',
+            'LDO': 'lido-dao',
+            'STRK':'starknet',
+            'CFX': 'conflux-token',
+            'BERA': 'bera',      
+            'DOT': 'polkadot',
+            'W': 'wormhole',     
+            'POPCAT': 'popcat',  
+            'SUI': 'sui',
+            'JUP': 'jupiter-exchange-solana'
         };
 
         function getTradeColor(action, closedPnl) {
             if (action === 'Open Long') return '#0dcaf0'; // 青色
-            if (action === 'Open Short') return '#dc3545'; // 紅色
+            if (action === 'Open Short') return '#ff3575'; 
             if (action === 'Close Long' || action === 'Close Short') {
                 if (Number(closedPnl) < 0) return '#dc3545'; // 負值紅色
                 else return '#28a745'; // 正值綠色
@@ -425,6 +463,96 @@
                     $('#coinPriceChart').show();
                 });
         }
+
+        function updateCoinSelect() {
+            const coinSelect = $('#coinSelect');
+            coinSelect.empty();
+            coinSelect.append('<option value="">請選擇幣種</option>');
+            
+            // 從 allTradeHistory 中獲取所有不重複的幣種
+            const uniqueCoins = [...new Set(allTradeHistory.map(t => t.coin))].sort();
+            
+            uniqueCoins.forEach(coin => {
+                if (coinIdMap[coin.toUpperCase()]) {
+                    coinSelect.append(`<option value="${coin}">${coin}</option>`);
+                }
+            });
+        }
+
+        $('#coinSelect').on('change', function() {
+            const selectedCoin = $(this).val();
+            if (!selectedCoin) {
+                $('#coinPriceChart').hide();
+                return;
+            }
+            
+            const startDate = $('#tradeStartDate').val();
+            const endDate = $('#tradeEndDate').val();
+            let start_time = '';
+            let end_time = '';
+            
+            if (startDate) {
+                start_time = new Date(startDate).setHours(0,0,0,0);
+            }
+            if (endDate) {
+                end_time = new Date(endDate).setHours(23,59,59,999);
+            }
+            if (startDate && !endDate) {
+                end_time = new Date(startDate).setHours(23,59,59,999);
+            }
+            if (!startDate && endDate) {
+                start_time = new Date(endDate).setHours(0,0,0,0);
+            }
+            
+            const fromTs = start_time ? Math.floor(start_time / 1000) : Math.floor(Date.now() / 1000) - 30 * 24 * 60 * 60;
+            const toTs = end_time ? Math.floor(end_time / 1000) : Math.floor(Date.now() / 1000);
+            
+            fetchAndDrawCoinPriceChart(selectedCoin, fromTs, toTs);
+        });
+
+        function fetchTradeHistory(address, page) {
+            if (!address) return;
+            $('#tradeHistoryTableContainer').show();
+            const startDate = $('#tradeStartDate').val();
+            const endDate = $('#tradeEndDate').val();
+            let start_time = '';
+            let end_time = '';
+            if (startDate) {
+                start_time = new Date(startDate).setHours(0,0,0,0);
+            }
+            if (endDate) {
+                end_time = new Date(endDate).setHours(23,59,59,999);
+            }
+            if (startDate && !endDate) {
+                end_time = new Date(startDate).setHours(23,59,59,999);
+            }
+            if (!startDate && endDate) {
+                start_time = new Date(endDate).setHours(0,0,0,0);
+            }
+            // 新增：如果都沒選，預設查最近7天
+            if (!startDate && !endDate) {
+                end_time = Date.now();
+                start_time = end_time - 7 * 24 * 60 * 60 * 1000;
+            }
+            let url = `/api/trades_by_address?address=${address}&page=${page}`;
+            if (start_time) url += `&start_time=${start_time}`;
+            if (end_time) url += `&end_time=${end_time}`;
+            fetch(url)
+                .then(res => res.json())
+                .then(data => {
+                    if (data.error) {
+                        $('#lookupTradeTable').DataTable().clear().draw();
+                        $('#tradePagination').html('');
+                        alert(data.error);
+                        return;
+                    }
+                    allTradeHistory = data.trades.slice();
+                    renderTradeHistoryTable(data.trades);
+                    updateTradePagination(data.page, data.pages);
+                    updateCoinSelect(); // 更新幣種選擇下拉選單
+                });
+        }
+
         $(document).ready(function() {
             const socket = io();
             const table = $('#tradeTable').DataTable({
@@ -593,20 +721,6 @@
                 }
             });
 
-            function renderTradeHistoryTable(trades) {
-                lastTradeHistory = trades;
-                const table = $('#lookupTradeTable').DataTable();
-                table.clear();
-                table.rows.add(trades);
-                table.draw();
-            }
-            function updateTradePagination(page, pages) {
-                let html = '';
-                for (let i = 1; i <= pages; i++) {
-                    html += `<li class="page-item${i === page ? ' active' : ''}"><a class="page-link" href="#" data-page="${i}">${i}</a></li>`;
-                }
-                $('#tradePagination').html(html);
-            }
             let currentTradeAddress = '';
             let currentTradePage = 1;
             $('#tradeHistoryForm').on('submit', function(e) {
@@ -623,50 +737,6 @@
                     fetchTradeHistory(currentTradeAddress, currentTradePage);
                 }
             });
-            function fetchTradeHistory(address, page) {
-                if (!address) return;
-                $('#tradeHistoryTableContainer').show();
-                const startDate = $('#tradeStartDate').val();
-                const endDate = $('#tradeEndDate').val();
-                let start_time = '';
-                let end_time = '';
-                if (startDate) {
-                    start_time = new Date(startDate).setHours(0,0,0,0);
-                }
-                if (endDate) {
-                    end_time = new Date(endDate).setHours(23,59,59,999);
-                }
-                if (startDate && !endDate) {
-                    end_time = new Date(startDate).setHours(23,59,59,999);
-                }
-                if (!startDate && endDate) {
-                    start_time = new Date(endDate).setHours(0,0,0,0);
-                }
-                let url = `/api/trades_by_address?address=${address}&page=${page}`;
-                if (start_time) url += `&start_time=${start_time}`;
-                if (end_time) url += `&end_time=${end_time}`;
-                fetch(url)
-                    .then(res => res.json())
-                    .then(data => {
-                        if (data.error) {
-                            $('#lookupTradeTable').DataTable().clear().draw();
-                            $('#tradePagination').html('');
-                            alert(data.error);
-                            return;
-                        }
-                        allTradeHistory = data.trades.slice();
-                        renderTradeHistoryTable(data.trades);
-                        updateTradePagination(data.page, data.pages);
-                        if (allTradeHistory.length > 0) {
-                            const coin = allTradeHistory[0].coin;
-                            const fromTs = start_time ? Math.floor(start_time / 1000) : Math.floor(Date.now() / 1000) - 30 * 24 * 60 * 60;
-                            const toTs = end_time ? Math.floor(end_time / 1000) : Math.floor(Date.now() / 1000);
-                            fetchAndDrawCoinPriceChart(coin, fromTs, toTs);
-                        } else {
-                            $('#coinPriceChart').hide();
-                        }
-                    });
-            }
             function formatLeaderboardROE(val) {
                 if (val === null || val === undefined) return '-';
                 return (val * 100).toFixed(2) + '%';
