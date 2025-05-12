@@ -124,6 +124,7 @@
                                 <th>Size</th>
                                 <th>Price</th>
                                 <th>Closed PnL</th>
+                                <th>合併筆數</th>
                             </tr>
                         </thead>
                         <tbody></tbody>
@@ -131,6 +132,10 @@
                     <nav>
                         <ul class="pagination" id="tradePagination"></ul>
                     </nav>
+                </div>
+                <div class="mt-4">
+                    <h6>幣價歷史走勢圖</h6>
+                    <canvas id="coinPriceChart" height="100"></canvas>
                 </div>
             </div>
         </div>
@@ -296,13 +301,130 @@
     <script src="https://cdn.jsdelivr.net/npm/datatables@1.10.18/media/js/jquery.dataTables.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
     <script>
         let lastPnlData = [];
         let pnlChart = null;
         let lastTradeHistory = [];
+        let allTradeHistory = [];
         let pnlTrackingInterval = null;
         let unrealizedAutoInterval = null;
         let lastTrackPnlAddress = '';
+        let coinPriceChart = null;
+        // 幣種ID對應表（可擴充）
+        const coinIdMap = {
+            'ETH': 'ethereum',
+            'BTC': 'bitcoin',
+            'ARB': 'arbitrum',
+            'OP': 'optimism',
+            'SOL': 'solana',
+            'BNB': 'binancecoin',
+            'DOGE': 'dogecoin',
+            'AVAX': 'avalanche-2',
+            'LINK': 'chainlink',
+            'MATIC': 'matic-network',
+            'XRP': 'ripple',
+            'ADA': 'cardano',
+            'LTC': 'litecoin',
+            'TRX': 'tron',
+            'PEPE': 'pepe',
+            'WIF': 'dogwifcoin',
+            // ...可自行擴充
+        };
+
+        function getTradeColor(action, closedPnl) {
+            if (action === 'Open Long') return '#0dcaf0'; // 青色
+            if (action === 'Open Short') return '#dc3545'; // 紅色
+            if (action === 'Close Long' || action === 'Close Short') {
+                if (Number(closedPnl) < 0) return '#dc3545'; // 負值紅色
+                else return '#28a745'; // 正值綠色
+            }
+            return '#6c757d'; // 其他灰色
+        }
+
+        function fetchAndDrawCoinPriceChart(coin, fromTs, toTs) {
+            const coinId = coinIdMap[coin?.toUpperCase()];
+            if (!coinId) {
+                $('#coinPriceChart').hide();
+                return;
+            }
+            // 只用 allTradeHistory 畫圖
+            const trades = allTradeHistory.filter(t => (t.coin || '').toUpperCase() === coin.toUpperCase());
+            // 不用 mergeTrades，直接用合併後資料
+            const tradePoints = trades.map(t => ({
+                x: new Date(t.timestamp),
+                y: Number(t.px),
+                action: t.action,
+                size: t.sz,
+                closedPnl: t.closedPnl,
+                color: getTradeColor(t.action, t.closedPnl)
+            }));
+            fetch(`/api/coin_price_history?coin_id=${coinId}&from=${fromTs}&to=${toTs}`)
+                .then(res => res.json())
+                .then(data => {
+                    if (!data.prices) {
+                        $('#coinPriceChart').hide();
+                        return;
+                    }
+                    const prices = data.prices.map(item => ({
+                        x: new Date(item[0]),
+                        y: item[1]
+                    }));
+                    const ctx = document.getElementById('coinPriceChart').getContext('2d');
+                    if (coinPriceChart) coinPriceChart.destroy();
+                    coinPriceChart = new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            datasets: [
+                                {
+                                    label: `${coin} 價格 (USD)`,
+                                    data: prices,
+                                    borderColor: 'blue',
+                                    fill: false,
+                                    pointRadius: 0
+                                },
+                                {
+                                    label: '交易點',
+                                    data: tradePoints,
+                                    type: 'scatter',
+                                    showLine: false,
+                                    pointRadius: 6,
+                                    pointBackgroundColor: tradePoints.map(p => p.color),
+                                    pointBorderColor: tradePoints.map(p => p.color),
+                                    pointHoverRadius: 8,
+                                    pointStyle: 'circle',
+                                    borderWidth: 2,
+                                    fill: false
+                                }
+                            ]
+                        },
+                        options: {
+                            responsive: true,
+                            scales: {
+                                x: { type: 'time', time: { unit: 'day' } },
+                                y: { beginAtZero: false }
+                            },
+                            plugins: {
+                                tooltip: {
+                                    callbacks: {
+                                        label: function(context) {
+                                            const d = context.raw;
+                                            if (!d) return '';
+                                            return [
+                                                `價格：${Number(d.y).toFixed(2)}`,
+                                                `動作：${d.action}`,
+                                                `size：${d.size}`,
+                                                `ClosedPnL：${d.closedPnl}`
+                                            ].join('\n');
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    });
+                    $('#coinPriceChart').show();
+                });
+        }
         $(document).ready(function() {
             const socket = io();
             const table = $('#tradeTable').DataTable({
@@ -362,17 +484,13 @@
                 searching: false,
                 lengthChange: false,
                 columns: [
-                    { 
-                        data: 'timestamp',
-                        render: function(data) {
-                            return data;
-                        }
-                    },
+                    { data: 'timestamp', render: function(data) { return data; } },
                     { data: 'coin' },
                     { data: 'action' },
                     { data: 'sz' },
                     { data: 'px' },
-                    { data: 'closedPnl' }
+                    { data: 'closedPnl' },
+                    { data: 'count', title: '合併筆數' }
                 ]
             });
 
@@ -475,62 +593,11 @@
                 }
             });
 
-            function mergeTrades(trades) {
-                if (!trades || trades.length === 0) return [];
-                // 先按coin, action, timestamp排序
-                trades = trades.slice().sort((a, b) => {
-                    if (a.coin !== b.coin) return a.coin.localeCompare(b.coin);
-                    if (a.action !== b.action) return a.action.localeCompare(b.action);
-                    return new Date(a.timestamp) - new Date(b.timestamp);
-                });
-                const merged = [];
-                let last = null;
-                for (let t of trades) {
-                    const tTime = new Date(t.timestamp).getTime();
-                    if (
-                        last &&
-                        last.coin === t.coin &&
-                        last.action === t.action &&
-                        (tTime - last._lastTime) <= 5 * 60 * 1000 // 5分鐘
-                    ) {
-                        // 合併
-                        last.sz = Number(last.sz) + Number(t.sz);
-                        last.closedPnl = Number(last.closedPnl) + Number(t.closedPnl);
-                        last._lastTime = tTime; // 更新最後一筆時間
-                        last._merged = true;
-                    } else {
-                        // 新的一組
-                        last = { ...t, _lastTime: tTime, _merged: false };
-                        merged.push(last);
-                    }
-                }
-                // 移除輔助欄位
-                merged.forEach(t => { delete t._lastTime; });
-                return merged;
-            }
             function renderTradeHistoryTable(trades) {
                 lastTradeHistory = trades;
-                // 先根據dir欄位補action
-                trades.forEach(t => {
-                    let action = '';
-                    if (t.dir === 'Open Long') action = '開多';
-                    else if (t.dir === 'Close Long') action = '平多';
-                    else if (t.dir === 'Open Short') action = '開空';
-                    else if (t.dir === 'Close Short') action = '平空';
-                    else action = t.dir || '';
-                    t.action = action;
-                    t.size = t.sz !== undefined ? t.sz : t.size;
-                    t.price = t.px !== undefined ? t.px : t.price;
-                });
-                // 合併
-                const mergedTrades = mergeTrades(trades);
-                // 標記合併
-                mergedTrades.forEach(t => {
-                    if (t._merged) t.action = t.action + '（合併）';
-                });
                 const table = $('#lookupTradeTable').DataTable();
                 table.clear();
-                table.rows.add(mergedTrades);
+                table.rows.add(trades);
                 table.draw();
             }
             function updateTradePagination(page, pages) {
@@ -587,15 +654,17 @@
                             alert(data.error);
                             return;
                         }
-                        data.trades.forEach(t => {
-                            if (t.side === 'A') {
-                                t.side = '<span class="text-success fw-bold">Buy</span>';
-                            } else if (t.side === 'B') {
-                                t.side = '<span class="text-danger fw-bold">Sell</span>';
-                            }
-                        });
+                        allTradeHistory = data.trades.slice();
                         renderTradeHistoryTable(data.trades);
                         updateTradePagination(data.page, data.pages);
+                        if (allTradeHistory.length > 0) {
+                            const coin = allTradeHistory[0].coin;
+                            const fromTs = start_time ? Math.floor(start_time / 1000) : Math.floor(Date.now() / 1000) - 30 * 24 * 60 * 60;
+                            const toTs = end_time ? Math.floor(end_time / 1000) : Math.floor(Date.now() / 1000);
+                            fetchAndDrawCoinPriceChart(coin, fromTs, toTs);
+                        } else {
+                            $('#coinPriceChart').hide();
+                        }
                     });
             }
             function formatLeaderboardROE(val) {

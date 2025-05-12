@@ -9,17 +9,32 @@ from threading import Thread
 from hyperliquid.info import Info
 import psycopg2
 import time
+import requests
+from collections import defaultdict
+import os
+from dotenv import load_dotenv
+
+# 加載環境變量
+load_dotenv()
 
 app = Flask(__name__)
 socketio = SocketIO(app)
 
+# 從環境變量讀取配置
+COINGECKO_API_KEY = os.getenv('COINGECKO_API_KEY')
+DB_NAME = os.getenv('DB_NAME', 'wallet_tracker')
+DB_USER = os.getenv('DB_USER', 'postgres')
+DB_PASSWORD = os.getenv('DB_PASSWORD', '')
+DB_HOST = os.getenv('DB_HOST', 'localhost')
+DB_PORT = os.getenv('DB_PORT', '5432')
+
 def get_db_connection():
     return psycopg2.connect(
-        dbname='wallet_tracker',
-        user='postgres',
-        password='',
-        host='localhost',
-        port=5432
+        dbname=DB_NAME,
+        user=DB_USER,
+        password=DB_PASSWORD,
+        host=DB_HOST,
+        port=DB_PORT
     )
 
 # Hyperliquid WebSocket endpoint
@@ -125,33 +140,49 @@ def get_trades_by_address():
             fills = info.user_fills_by_time(address, start_time, end_time)
         else:
             fills = info.user_fills(address)
-        # Sort by time descending
-        fills = sorted(fills, key=lambda x: x.get('time', 0), reverse=True)
+        # 合併：coin, dir, 小時
+        merged = defaultdict(lambda: {'sz': 0, 'closedPnl': 0, 'px_sum': 0, 'px_weight': 0, 'count': 0, 'first_time': None})
+        for fill in fills:
+            coin = fill.get('coin', 'Unknown')
+            dir_ = fill.get('dir', '')
+            t = fill.get('time', 0)
+            # 向下取整到小時
+            hour_ts = t - (t % (60*60*1000))
+            key = (coin, dir_, hour_ts)
+            sz = float(fill.get('sz', 0))
+            px = float(fill.get('px', 0))
+            closedPnl = float(fill.get('closedPnl', 0))
+            merged[key]['sz'] += sz
+            merged[key]['closedPnl'] += closedPnl
+            merged[key]['px_sum'] += px * abs(sz)
+            merged[key]['px_weight'] += abs(sz)
+            merged[key]['count'] += 1
+            if merged[key]['first_time'] is None or t < merged[key]['first_time']:
+                merged[key]['first_time'] = t
+        # 轉成列表
+        merged_list = []
+        for (coin, dir_, hour_ts), v in merged.items():
+            px = v['px_sum'] / v['px_weight'] if v['px_weight'] else 0
+            merged_list.append({
+                'timestamp': datetime.fromtimestamp(hour_ts / 1000).strftime('%Y-%m-%d %H:00:00'),
+                'coin': coin,
+                'action': dir_,
+                'sz': v['sz'],
+                'px': px,
+                'closedPnl': v['closedPnl'],
+                'count': v['count']
+            })
+        # 時間倒序
+        merged_list = sorted(merged_list, key=lambda x: x['timestamp'], reverse=True)
+        total = len(merged_list)
         start = (page - 1) * limit
         end = start + limit
-        paged_fills = fills[start:end]
-        trades = []
-        for fill in paged_fills:
-            trades.append({
-                'timestamp': datetime.fromtimestamp(fill.get("time", 0) / 1000).strftime('%Y-%m-%d %H:%M:%S'),
-                'coin': fill.get("coin", "Unknown"),
-                'side': fill.get("side", "Unknown"),
-                'sz': fill.get("sz", 0),
-                'px': fill.get("px", 0),
-                'dir': fill.get("dir", ""),
-                'closedPnl': fill.get("closedPnl", 0),
-                'hash': fill.get("hash", ""),
-                'oid': fill.get("oid", ""),
-                'crossed': fill.get("crossed", False),
-                'fee': fill.get("fee", 0),
-                'tid': fill.get("tid", ""),
-                'feeToken': fill.get("feeToken", "")
-            })
+        paged = merged_list[start:end]
         return jsonify({
-            'trades': trades,
-            'total': len(fills),
+            'trades': paged,
+            'total': total,
             'page': page,
-            'pages': (len(fills) + limit - 1) // limit
+            'pages': (total + limit - 1) // limit
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -315,6 +346,26 @@ def track_pnl():
         return jsonify(pnl_data)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/coin_price_history')
+def coin_price_history():
+    coin_id = request.args.get('coin_id')
+    from_ts = request.args.get('from')
+    to_ts = request.args.get('to')
+    if not coin_id or not from_ts or not to_ts:
+        return jsonify({'error': '缺少參數'}), 400
+
+    url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart/range"
+    headers = {
+        "x-cg-demo-api-key": COINGECKO_API_KEY
+    }
+    params = {
+        "vs_currency": "usd",
+        "from": from_ts,
+        "to": to_ts
+    }
+    resp = requests.get(url, headers=headers, params=params)
+    return jsonify(resp.json())
 
 if __name__ == '__main__':
     wallet_address = "0xd5f7974e1be5b336094a18c230f39607934e367d"
