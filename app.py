@@ -141,7 +141,7 @@ def get_trades_by_address():
         else:
             fills = info.user_fills(address)
         # 合併：coin, dir, 小時
-        merged = defaultdict(lambda: {'sz': 0, 'closedPnl': 0, 'px_sum': 0, 'px_weight': 0, 'count': 0, 'first_time': None})
+        merged = defaultdict(lambda: {'sz': 0, 'closedPnl': 0, 'px_sum': 0, 'px_weight': 0, 'count': 0, 'first_time': None, 'last_time': None})
         for fill in fills:
             coin = fill.get('coin', 'Unknown')
             dir_ = fill.get('dir', '')
@@ -159,6 +159,8 @@ def get_trades_by_address():
             merged[key]['count'] += 1
             if merged[key]['first_time'] is None or t < merged[key]['first_time']:
                 merged[key]['first_time'] = t
+            if merged[key]['last_time'] is None or t > merged[key]['last_time']:
+                merged[key]['last_time'] = t
         # 轉成列表
         merged_list = []
         for (coin, dir_, hour_ts), v in merged.items():
@@ -170,10 +172,11 @@ def get_trades_by_address():
                 'sz': v['sz'],
                 'px': px,
                 'closedPnl': v['closedPnl'],
-                'count': v['count']
+                'count': v['count'],
+                'last_time': v['last_time']
             })
-        # 時間倒序
-        merged_list = sorted(merged_list, key=lambda x: x['timestamp'], reverse=True)
+        # 用 last_time 倒序排序
+        merged_list = sorted(merged_list, key=lambda x: x['last_time'], reverse=True)
         total = len(merged_list)
         start = (page - 1) * limit
         end = start + limit
@@ -198,41 +201,111 @@ def pnl_timeseries():
         now = datetime.now()
         df = pd.DataFrame(fills)
         df['date'] = df['time'].apply(lambda t: datetime.fromtimestamp(t / 1000).strftime('%Y-%m-%d'))
-        df['closedPnl'] = df['closedPnl'].astype(float)
-        df['sz'] = df['sz'].astype(float)
-        df['px'] = df['px'].astype(float)
-        df['size_usd'] = df['sz'] * df['px']
-        df['dt'] = df['time'].apply(lambda t: datetime.utcfromtimestamp(t / 1000))
         
-        # 计算总体胜率
+        # 添加新的列
+        df['fee_usd'] = df['fee'].astype(float)
+        df['px'] = df['px'].astype(float)
+        df['sz'] = df['sz'].astype(float)
+        df['closedPnl'] = df['closedPnl'].astype(float)
+        df['startPosition'] = df['startPosition'].astype(float)
+        
+        # 按訂單ID分組計算
+        order_groups = df.groupby('oid')
+        
+        # 計算每個訂單的總成交量和加權平均價格
+        order_summary = order_groups.agg({
+            'sz': 'sum',
+            'px': lambda x: (x * df.loc[x.index, 'sz']).sum() / df.loc[x.index, 'sz'].sum(),
+            'closedPnl': 'sum',
+            'fee_usd': 'sum',
+            'time': 'first',
+            'coin': 'first',
+            'dir': 'first',
+            'hash': 'first'
+        }).reset_index()
+        
+        # 計算淨盈虧
+        order_summary['netPnl'] = order_summary['closedPnl'] - order_summary['fee_usd']
+        print(order_summary[['oid','coin','closedPnl','fee_usd','netPnl']].head())
+        
+        # 計算 RRR (Risk-Reward Ratio)
+        # 假設每筆交易的止損點是進場價格的 2%
+        order_summary['entry_price'] = order_summary['px']
+        order_summary['stop_loss'] = order_summary['entry_price'] * 0.98  # 2% 止損
+        order_summary['take_profit'] = order_summary['entry_price'] * (1 + order_summary['netPnl'] / (order_summary['sz'] * order_summary['entry_price']))
+        order_summary['rrr'] = abs((order_summary['take_profit'] - order_summary['entry_price']) / (order_summary['entry_price'] - order_summary['stop_loss']))
+        
+        # 計算 P/L Ratio
+        avg_profit = order_summary[order_summary['netPnl'] > 0]['netPnl'].mean()
+        avg_loss = abs(order_summary[order_summary['netPnl'] < 0]['netPnl'].mean())
+        pl_ratio = avg_profit / avg_loss if avg_loss > 0 else None
+        
+        # 計算 Kelly 公式
+        winrate_decimal = len(order_summary[order_summary['netPnl'] > 0]) / len(order_summary) if len(order_summary) > 0 else 0
+        kelly = winrate_decimal - (1 - winrate_decimal) / pl_ratio if pl_ratio else None
+        
+        # 獲取當前市價並轉換為float
+        mark_prices = info.all_mids()
+        mark_prices = {k: float(v) for k, v in mark_prices.items()}
+        
+        # 計算未實現盈虧
+        # 注意：這裡需要從 user_state 獲取當前持倉信息
+        user_state = info.user_state(address)
+        unrealized_pnl = 0.0
+        
+        for position in user_state.get('assetPositions', []):
+            coin = position.get('coin')
+            if coin in mark_prices:
+                position_data = position.get('position', {})
+                size = float(position_data.get('sz', 0))
+                entry_price = float(position_data.get('entryPx', 0))
+                leverage = float(position_data.get('leverage', 1))
+                
+                if size != 0 and entry_price != 0:
+                    mark_price = mark_prices[coin]
+                    unrealized_pnl += (mark_price - entry_price) * size * leverage
+        
+        # 更新DataFrame
+        df = order_summary.copy()
+        df['date'] = df['time'].apply(lambda t: datetime.utcfromtimestamp(t / 1000).strftime('%Y-%m-%d'))
+        df['dt'] = df['time'].apply(lambda t: datetime.utcfromtimestamp(t / 1000))
+        df['size_usd'] = df['sz'] * df['px']
+        
+        # 使用 netPnl 計算勝率
         total_trades = len(df)
-        winning_trades = len(df[df['closedPnl'] > 0])
+        winning_trades = len(df[df['netPnl'] > 0])
         overall_winrate = (winning_trades / total_trades * 100) if total_trades > 0 else 0
         
-        # 计算累计盈亏
-        total_pnl = df['closedPnl'].sum()
+        # 計算累計淨盈虧（包括未實現盈虧）
+        total_pnl = df['netPnl'].sum() + unrealized_pnl
         
         # Calculate cumulative PnL for 7D, 30D, 90D
         cutoff_7d = now - timedelta(days=7)
         cutoff_30d = now - timedelta(days=30)
         cutoff_90d = now - timedelta(days=90)
-        cum_pnl_7d = df[df['dt'] >= cutoff_7d]['closedPnl'].sum()
-        cum_pnl_30d = df[df['dt'] >= cutoff_30d]['closedPnl'].sum()
-        cum_pnl_90d = df[df['dt'] >= cutoff_90d]['closedPnl'].sum()
+        cum_pnl_7d = df[df['dt'] >= cutoff_7d]['netPnl'].sum()
+        cum_pnl_30d = df[df['dt'] >= cutoff_30d]['netPnl'].sum()
+        cum_pnl_90d = df[df['dt'] >= cutoff_90d]['netPnl'].sum()
         
         # Group by date
         summary = []
         for date, group in df.groupby('date'):
             num_trades = len(group)
-            winrate = 100.0 * (group['closedPnl'] > 0).sum() / num_trades if num_trades > 0 else 0.0
+            winrate = 100.0 * (group['netPnl'] > 0).sum() / num_trades if num_trades > 0 else 0.0
             coins_traded = sorted(group['coin'].unique())
             median_size_usd = float(group['size_usd'].median()) if num_trades > 0 else 0.0
+
+            # for debug purposes 
+            print(f"=== {date} trades netPnls: ===")
+            print(group['netPnl'].tolist())
+
             summary.append({
                 'date': date,
                 'num_trades': num_trades,
                 'winrate': round(winrate, 2),
                 'coins_traded': coins_traded,
                 'median_size_usd': median_size_usd,
+                'sum_netPnl': round(group['netPnl'].sum(), 2),
                 'cum_pnl_7d': cum_pnl_7d,
                 'cum_pnl_30d': cum_pnl_30d,
                 'cum_pnl_90d': cum_pnl_90d
@@ -244,7 +317,10 @@ def pnl_timeseries():
                 'total_pnl': total_pnl,
                 'overall_winrate': round(overall_winrate, 2),
                 'total_trades': total_trades,
-                'winning_trades': winning_trades
+                'winning_trades': winning_trades,
+                'avg_rrr': round(order_summary['rrr'].mean(), 2),
+                'pl_ratio': round(pl_ratio, 2) if pl_ratio else None,
+                'kelly': round(kelly * 100, 2) if kelly else None
             }
         })
     except Exception as e:

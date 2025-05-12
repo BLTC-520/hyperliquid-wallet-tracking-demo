@@ -4,304 +4,353 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Hyperliquid Trade History</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdn.jsdelivr.net/npm/datatables@1.10.18/media/css/jquery.dataTables.min.css" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        primary: {
+                            50: '#f0f9ff',
+                            100: '#e0f2fe',
+                            200: '#bae6fd',
+                            300: '#7dd3fc',
+                            400: '#38bdf8',
+                            500: '#0ea5e9',
+                            600: '#0284c7',
+                            700: '#0369a1',
+                            800: '#075985',
+                            900: '#0c4a6e',
+                        },
+                        secondary: {
+                            50: '#f8fafc',
+                            100: '#f1f5f9',
+                            200: '#e2e8f0',
+                            300: '#cbd5e1',
+                            400: '#94a3b8',
+                            500: '#64748b',
+                            600: '#475569',
+                            700: '#334155',
+                            800: '#1e293b',
+                            900: '#0f172a',
+                        },
+                    }
+                }
+            }
+        }
+    </script>
     <style>
-        body {
-            background-color: #f8f9fa;
-            padding: 20px;
+        .buy { color: #10B981; }
+        .sell { color: #EF4444; }
+        .table-container { overflow-x: auto; }
+        .card { transition: all 0.3s ease; }
+        .card:hover { transform: translateY(-2px); }
+        .btn { transition: all 0.2s ease; }
+        .btn:hover { transform: translateY(-1px); }
+        .loading-spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #3498db;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
         }
-        .card {
-            border-radius: 10px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            margin-bottom: 20px;
-        }
-        .card-header {
-            background-color: #007bff;
-            color: white;
-            border-radius: 10px 10px 0 0 !important;
-        }
-        .table {
-            margin-bottom: 0;
-        }
-        .buy {
-            color: #28a745;
-        }
-        .sell {
-            color: #dc3545;
-        }
-        #tradeTable {
-            width: 100% !important;
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
         }
     </style>
 </head>
-<body>
-    <div class="container">
-        <div class="card mb-4">
-            <div class="card-header">Asset Positions & Account Summary</div>
-            <div class="card-body">
-                <form id="userStateForm" class="row g-3 mb-3">
-                    <div class="col-auto">
-                        <input type="text" class="form-control" id="walletAddress" placeholder="Enter wallet address">
-                    </div>
-                    <div class="col-auto">
-                        <button type="submit" class="btn btn-primary mb-3">Lookup</button>
-                    </div>
+<body class="bg-gray-50 dark:bg-gray-900 min-h-screen">
+    <div class="w-full flex justify-end items-center py-2 px-4">
+        <button id="toggleDarkBtn" class="px-4 py-2 rounded-lg bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-100 hover:bg-gray-300 dark:hover:bg-gray-600 transition">
+            夜間模式
+        </button>
+    </div>
+    <div class="max-w-7xl mx-auto px-4 py-8">
+        <!-- 資產位置和賬戶摘要 -->
+        <div class="bg-white rounded-xl shadow-lg mb-8 overflow-hidden">
+            <div class="bg-primary-600 text-white px-6 py-4">
+                <h2 class="text-xl font-semibold">資產位置和賬戶摘要</h2>
+            </div>
+            <div class="p-6">
+                <form id="userStateForm" class="flex flex-wrap gap-4 mb-6">
+                    <input type="text" class="flex-1 min-w-[200px] px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500" id="walletAddress" placeholder="輸入錢包地址">
+                    <button type="submit" class="px-6 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2">
+                        查詢
+                    </button>
                 </form>
-                <div id="accountSummary" class="mb-3" style="display:none;"></div>
-                <div id="positionsTableContainer" style="display:none;">
-                    <table class="table table-bordered table-hover align-middle" id="positionsTable">
-                        <thead class="table-light">
-                            <tr>
-                                <th>Coin</th>
-                                <th>Entry Price</th>
-                                <th>Leverage</th>
-                                <th>Position Value</th>
-                                <th>Margin Used</th>
-                                <th>Size</th>
-                                <th>Unrealized PnL</th>
-                                <th>ROE</th>
-                                <th>Funding (All/SinceChange/SinceOpen)</th>
-                            </tr>
-                        </thead>
-                        <tbody></tbody>
-                    </table>
+                <div id="accountSummary" class="hidden grid grid-cols-1 md:grid-cols-4 gap-4 mb-6"></div>
+                <div id="positionsTableContainer" class="hidden">
+                    <div class="table-container">
+                        <table class="min-w-full divide-y divide-gray-200" id="positionsTable">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">幣種</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">入場價格</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">槓桿</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">倉位價值</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">保證金</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">數量</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">未實現盈虧</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ROE</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">資金費率</th>
+                                </tr>
+                            </thead>
+                            <tbody class="bg-white divide-y divide-gray-200"></tbody>
+                        </table>
+                    </div>
                 </div>
-                <div id="userStateError" class="alert alert-danger" style="display:none;"></div>
+                <div id="userStateError" class="hidden mt-4 p-4 bg-red-100 text-red-700 rounded-lg"></div>
+
+                <!-- 盈虧資訊合併顯示 -->
+                <div id="pnlTrackingStats" class="hidden grid grid-cols-1 md:grid-cols-4 gap-4 mt-8">
+                    <div class="bg-gray-50 p-4 rounded-lg h-full">
+                        <h6 class="text-sm font-medium text-gray-500">已實現盈虧</h6>
+                        <h4 class="text-xl font-semibold text-gray-900" id="realizedPnl">-</h4>
+                    </div>
+                    <div class="bg-gray-50 p-4 rounded-lg h-full">
+                        <h6 class="text-sm font-medium text-gray-500 flex items-center">
+                            資金費率盈虧
+                            <button type="button" tabindex="0" class="ml-1 focus:outline-none cursor-pointer" title="資金費率盈虧：持有合約倉位時因資金費率產生的損益，正值表示收到費用，負值表示支付費用。">
+                                <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><circle cx="12" cy="8" r="1"/></svg>
+                            </button>
+                        </h6>
+                        <h4 class="text-xl font-semibold text-gray-900" id="fundingPnl">-</h4>
+                    </div>
+                    <div class="bg-gray-50 p-4 rounded-lg h-full">
+                        <h6 class="text-sm font-medium text-gray-500 flex items-center">
+                            未實現盈虧
+                            <button id="refreshUnrealizedBtn" type="button" class="inline-flex items-center ml-2 text-gray-500 hover:text-gray-700 focus:outline-none cursor-pointer" title="刷新未實現盈虧">
+                                <span class="loading-spinner hidden" id="unrealizedLoading"></span>
+                                <svg id="unrealizedRefreshIcon" class="w-5 h-5" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <path d="M16.3788 6.20698C15.1885 5.25459 13.7434 4.5 12 4.5C7.85787 4.5 4.5 7.85786 4.5 12C4.5 16.1421 7.85787 19.5 12 19.5C15.2549 19.5 18.028 17.4254 19.0646 14.5256C19.2505 14.0055 19.775 13.6568 20.3153 13.7713L21.2935 13.9787C21.8338 14.0932 22.1836 14.6262 22.0179 15.1531C20.6787 19.4112 16.7016 22.5 12 22.5C6.20101 22.5 1.5 17.799 1.5 12C1.5 6.20101 6.20101 1.5 12 1.5C14.7835 1.5 16.9516 2.76847 18.5112 4.0746L20.2929 2.29289C20.5789 2.00689 21.009 1.92134 21.3827 2.07612C21.7564 2.2309 22 2.59554 22 3V8.5C22 9.05228 21.5523 9.5 21 9.5H15.5C15.0956 9.5 14.7309 9.25636 14.5761 8.88268C14.4214 8.50901 14.5069 8.07889 14.7929 7.79289L16.3788 6.20698Z" fill="currentColor"/>
+                                </svg>
+                            </button>
+                        </h6>
+                        <h4 class="text-xl font-semibold text-gray-900" id="unrealizedPnl">-</h4>
+                    </div>
+                    <div class="bg-gray-50 p-4 rounded-lg h-full">
+                        <h6 class="text-sm font-medium text-gray-500">總累計盈虧</h6>
+                        <h4 class="text-xl font-semibold text-gray-900" id="totalCumulativePnl">-</h4>
+                    </div>
+                </div>
             </div>
         </div>
-        <div class="card mb-4">
-            <div class="card-header">Trade History Lookup</div>
-            <div class="card-body">
-                <div class="row g-3 mb-2">
-                    <div class="col-auto">
-                        <select class="form-select" id="favoriteDropdown">
-                            <option value="">選擇收藏地址（依標籤）</option>
-                        </select>
-                    </div>
-                    <div class="col-auto">
-                        <input type="text" class="form-control" id="filterCoin" placeholder="搜尋幣種（如ETH）">
-                    </div>
-                    <div class="col-auto">
-                        <select class="form-select" id="sortDropdown">
-                            <option value="timestamp">時間</option>
-                            <option value="sz">Size</option>
-                            <option value="px">Price</option>
-                            <option value="closedPnl">盈利</option>
-                        </select>
-                    </div>
-                    <div class="col-auto">
-                        <input type="number" class="form-control" id="minSize" placeholder="最小Size">
-                    </div>
-                    <div class="col-auto">
-                        <button type="button" class="btn btn-secondary" id="applyFilterBtn">篩選/排序</button>
-                    </div>
+
+        <!-- 交易歷史查詢 -->
+        <div class="bg-white rounded-xl shadow-lg mb-8 overflow-hidden">
+            <div class="bg-primary-600 text-white px-6 py-4">
+                <h2 class="text-xl font-semibold">交易歷史查詢</h2>
+            </div>
+            <div class="p-6">
+                <div class="flex flex-wrap gap-4 mb-6">
+                    <select class="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500" id="favoriteDropdown">
+                        <option value="">選擇收藏地址（依標籤）</option>
+                    </select>
+                    <input type="text" class="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500" id="filterCoin" placeholder="搜尋幣種（如ETH）">
+                    <select class="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500" id="sortDropdown">
+                        <option value="timestamp">時間</option>
+                        <option value="sz">Size</option>
+                        <option value="px">Price</option>
+                        <option value="closedPnl">盈利</option>
+                    </select>
+                    <input type="number" class="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500" id="minSize" placeholder="最小Size">
+                    <button type="button" class="px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2" id="applyFilterBtn">
+                        篩選/排序
+                    </button>
                 </div>
-                <form id="tradeHistoryForm" class="row g-3">
-                    <div class="col-auto">
-                        <input type="text" class="form-control" id="tradeWalletAddress" placeholder="Enter wallet address">
-                    </div>
-                    <div class="col-auto">
-                        <input type="date" class="form-control" id="tradeStartDate" placeholder="Start date">
-                    </div>
-                    <div class="col-auto">
-                        <input type="date" class="form-control" id="tradeEndDate" placeholder="End date">
-                    </div>
-                    <div class="col-auto">
-                        <button type="submit" class="btn btn-primary mb-3">Lookup</button>
-                    </div>
+
+                <form id="tradeHistoryForm" class="flex flex-wrap gap-4 mb-6">
+                    <input type="text" class="flex-1 min-w-[200px] px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500" id="tradeWalletAddress" placeholder="輸入錢包地址">
+                    <input type="date" class="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500" id="tradeStartDate">
+                    <input type="date" class="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500" id="tradeEndDate">
+                    <button type="submit" class="px-6 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2">
+                        查詢
+                    </button>
                 </form>
-                <div class="col-auto">
-                    <button type="button" class="btn btn-warning mb-3" id="favoriteAddressBtn">收藏此地址</button>
-                </div>
-                <div id="tradeHistoryTableContainer" style="display:none;">
-                    <table id="lookupTradeTable" class="table table-striped">
-                        <thead>
-                            <tr>
-                                <th>Time</th>
-                                <th>Coin</th>
-                                <th>動作</th>
-                                <th>Size</th>
-                                <th>Price</th>
-                                <th>Closed PnL</th>
-                                <th>合併筆數</th>
-                            </tr>
-                        </thead>
-                        <tbody></tbody>
-                    </table>
-                    <nav>
-                        <ul class="pagination" id="tradePagination"></ul>
+
+                <button type="button" class="mb-6 px-6 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:ring-offset-2" id="favoriteAddressBtn">
+                    收藏此地址
+                </button>
+
+                <div id="tradeHistoryTableContainer" class="hidden">
+                    <div class="table-container">
+                        <table id="lookupTradeTable" class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">時間</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">幣種</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">動作</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Size</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">價格</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">已實現盈虧</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">合併筆數</th>
+                                </tr>
+                            </thead>
+                            <tbody class="bg-white divide-y divide-gray-200"></tbody>
+                        </table>
+                    </div>
+                    <nav class="mt-4">
+                        <ul class="flex justify-center space-x-2" id="tradePagination"></ul>
                     </nav>
                 </div>
-                <div class="mt-4">
-                    <div class="row mb-3">
-                        <div class="col-auto">
-                            <label for="coinSelect" class="form-label">選擇幣種：</label>
-                            <select class="form-select" id="coinSelect">
-                                <option value="">請選擇幣種</option>
-                            </select>
-                        </div>
+
+                <div class="mt-8">
+                    <div class="mb-4">
+                        <label for="coinSelect" class="block text-sm font-medium text-gray-700 mb-2">選擇幣種：</label>
+                        <select class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500" id="coinSelect">
+                            <option value="">請選擇幣種</option>
+                        </select>
                     </div>
-                    <h6>幣價歷史走勢圖</h6>
-                    <canvas id="coinPriceChart" height="100"></canvas>
+                    <h6 class="text-lg font-semibold text-gray-900 mb-4">幣價歷史走勢圖</h6>
+                    <div class="bg-white p-4 rounded-lg shadow">
+                        <canvas id="coinPriceChart" height="100"></canvas>
+                    </div>
                 </div>
             </div>
         </div>
-       
-        <div class="card mb-4">
-            <div class="card-header bg-info text-white">Cumulative PnL Over Time</div>
-            <div class="card-body">
-                <form id="pnlChartForm" class="row g-3 mb-3">
-                    <div class="col-auto">
-                        <input type="text" class="form-control" id="pnlWalletAddress" placeholder="Enter wallet address">
-                    </div>
-                    <div class="col-auto">
-                        <button type="submit" class="btn btn-info text-white">Plot</button>
-                    </div>
+
+        <!-- 累計盈虧圖表 -->
+        <div class="bg-white rounded-xl shadow-lg mb-8 overflow-hidden">
+            <div class="bg-blue-600 text-white px-6 py-4">
+                <h2 class="text-xl font-semibold">累計盈虧圖表</h2>
+            </div>
+            <div class="p-6">
+                <form id="pnlChartForm" class="flex flex-wrap gap-4 mb-6">
+                    <select class="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" id="pnlFavoriteDropdown">
+                        <option value="">選擇收藏地址（依標籤）</option>
+                    </select>
+                    <input type="text" class="flex-1 min-w-[200px] px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" id="pnlWalletAddress" placeholder="輸入錢包地址">
+                    <button type="submit" class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
+                        繪製圖表
+                    </button>
                 </form>
-                <div id="overallStats" class="row mb-4" style="display: none;">
-                    <div class="col-md-3">
-                        <div class="card bg-light">
-                            <div class="card-body">
-                                <h6 class="card-title">总累计盈亏</h6>
-                                <h4 class="card-text" id="totalPnl">-</h4>
-                            </div>
-                        </div>
+
+                <div id="overallStats" class="hidden grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                    <div class="bg-gray-50 p-4 rounded-lg">
+                        <h6 class="text-sm font-medium text-gray-500">總累計盈虧</h6>
+                        <h4 class="text-xl font-semibold text-gray-900" id="totalPnl">-</h4>
                     </div>
-                    <div class="col-md-3">
-                        <div class="card bg-light">
-                            <div class="card-body">
-                                <h6 class="card-title">总体胜率</h6>
-                                <h4 class="card-text" id="overallWinrate">-</h4>
-                            </div>
-                        </div>
+                    <div class="bg-gray-50 p-4 rounded-lg">
+                        <h6 class="text-sm font-medium text-gray-500">總體勝率</h6>
+                        <h4 class="text-xl font-semibold text-gray-900" id="overallWinrate">-</h4>
                     </div>
-                    <div class="col-md-3">
-                        <div class="card bg-light">
-                            <div class="card-body">
-                                <h6 class="card-title">总交易数</h6>
-                                <h4 class="card-text" id="totalTrades">-</h4>
-                            </div>
-                        </div>
+                    <div class="bg-gray-50 p-4 rounded-lg">
+                        <h6 class="text-sm font-medium text-gray-500">總交易數</h6>
+                        <h4 class="text-xl font-semibold text-gray-900" id="totalTrades">-</h4>
                     </div>
-                    <div class="col-md-3">
-                        <div class="card bg-light">
-                            <div class="card-body">
-                                <h6 class="card-title">盈利交易数</h6>
-                                <h4 class="card-text" id="winningTrades">-</h4>
-                            </div>
-                        </div>
+                    <div class="bg-gray-50 p-4 rounded-lg">
+                        <h6 class="text-sm font-medium text-gray-500">盈利交易數</h6>
+                        <h4 class="text-xl font-semibold text-gray-900" id="winningTrades">-</h4>
                     </div>
                 </div>
-                <div class="row mb-3">
-                    <div class="col-auto">
-                        <label for="pnlStatSelect" class="form-label">Chart Stat:</label>
-                        <select id="pnlStatSelect" class="form-select">
-                            <option value="winrate">Winrate (%)</option>
-                            <option value="num_trades">Number of Trades</option>
+
+                <div class="flex flex-wrap gap-4 mb-6">
+                    <div>
+                        <label for="pnlStatSelect" class="block text-sm font-medium text-gray-700 mb-2">圖表統計：</label>
+                        <select id="pnlStatSelect" class="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                            <option value="winrate">勝率 (%)</option>
+                            <option value="num_trades">交易數量</option>
                         </select>
                     </div>
-                    <div class="col-auto">
-                        <label for="pnlTimeframeSelect" class="form-label">Time Frame:</label>
-                        <select id="pnlTimeframeSelect" class="form-select">
-                            <option value="all">All Time</option>
-                            <option value="90d">90D</option>
-                            <option value="30d">30D</option>
-                            <option value="7d">7D</option>
+                    <div>
+                        <label for="pnlTimeframeSelect" class="block text-sm font-medium text-gray-700 mb-2">時間範圍：</label>
+                        <select id="pnlTimeframeSelect" class="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                            <option value="all">全部時間</option>
+                            <option value="90d">90天</option>
+                            <option value="30d">30天</option>
+                            <option value="7d">7天</option>
                         </select>
                     </div>
                 </div>
-                <canvas id="pnlChart" height="100"></canvas>
-                <div class="table-responsive mt-4">
-                    <table class="table table-bordered table-hover align-middle" id="pnlSummaryTable">
-                        <thead class="table-info">
+
+                <div class="bg-white p-4 rounded-lg shadow mb-6">
+                    <canvas id="pnlChart" height="100"></canvas>
+                </div>
+
+                <div class="table-container">
+                    <table class="min-w-full divide-y divide-gray-200" id="pnlSummaryTable">
+                        <thead class="bg-gray-50">
                             <tr>
-                                <th>Date</th>
-                                <th># Trades</th>
-                                <th>Winrate (%)</th>
-                                <th>Coins Traded</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">日期</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">交易數</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">勝率 (%)</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">交易幣種</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">總淨盈虧</th>
                             </tr>
                         </thead>
-                        <tbody></tbody>
+                        <tbody class="bg-white divide-y divide-gray-200"></tbody>
                     </table>
                 </div>
             </div>
         </div>
 
-        <div class="card mb-4">
-            <div class="card-header bg-success text-white">实时盈亏追踪</div>
-            <div class="card-body">
-                <form id="trackPnlForm" class="row g-3 mb-3">
-                    <div class="col-auto">
-                        <input type="text" class="form-control" id="trackPnlAddress" placeholder="输入钱包地址">
+        <!-- 交易策略分析 -->
+        <div class="bg-white rounded-xl shadow-lg mb-8 overflow-hidden">
+            <div class="bg-yellow-600 text-white px-6 py-4">
+                <h2 class="text-xl font-semibold">交易策略分析</h2>
+            </div>
+            <div class="p-6">
+                <div id="strategyAnalysisStats" class="hidden grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                    <div class="bg-gray-50 p-4 rounded-lg">
+                        <h6 class="text-sm font-medium text-gray-500">平均 RRR</h6>
+                        <h4 class="text-xl font-semibold text-gray-900" id="avgRrr">-</h4>
+                        <p class="text-xs text-gray-500">風險報酬比</p>
                     </div>
-                    <div class="col-auto">
-                        <button type="submit" class="btn btn-success text-white">开始追踪</button>
+                    <div class="bg-gray-50 p-4 rounded-lg">
+                        <h6 class="text-sm font-medium text-gray-500">P/L 比率</h6>
+                        <h4 class="text-xl font-semibold text-gray-900" id="plRatio">-</h4>
+                        <p class="text-xs text-gray-500">平均盈利/平均虧損</p>
                     </div>
-                </form>
-                <div id="pnlTrackingStats" class="row mb-4" style="display: none;">
-                    <div class="col-md-3">
-                        <div class="card bg-light">
-                            <div class="card-body">
-                                <h6 class="card-title">已实现盈亏</h6>
-                                <h4 class="card-text" id="realizedPnl">-</h4>
-                            </div>
-                        </div>
+                    <div class="bg-gray-50 p-4 rounded-lg">
+                        <h6 class="text-sm font-medium text-gray-500">Kelly 值</h6>
+                        <h4 class="text-xl font-semibold text-gray-900" id="kellyValue">-</h4>
+                        <p class="text-xs text-gray-500">建議資金比例</p>
                     </div>
-                    <div class="col-md-3">
-                        <div class="card bg-light">
-                            <div class="card-body">
-                                <h6 class="card-title">资金费率盈亏</h6>
-                                <h4 class="card-text" id="fundingPnl">-</h4>
-                            </div>
-                        </div>
+                    <div class="bg-gray-50 p-4 rounded-lg">
+                        <h6 class="text-sm font-medium text-gray-500">策略健康度</h6>
+                        <h4 class="text-xl font-semibold text-gray-900" id="strategyHealth">-</h4>
+                        <p class="text-xs text-gray-500">綜合評估</p>
                     </div>
-                    <div class="col-md-3">
-                        <div class="card bg-light">
-                            <div class="card-body">
-                                <h6 class="card-title">未实现盈亏
-                                    <button id="refreshUnrealizedBtn" type="button" class="btn btn-link p-0 ms-2" title="刷新未实现盈亏">
-                                        <span class="spinner-border spinner-border-sm d-none" id="unrealizedLoading" role="status" aria-hidden="true"></span>
-                                        <svg id="unrealizedRefreshIcon" width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                            <path d="M16.3788 6.20698C15.1885 5.25459 13.7434 4.5 12 4.5C7.85787 4.5 4.5 7.85786 4.5 12C4.5 16.1421 7.85787 19.5 12 19.5C15.2549 19.5 18.028 17.4254 19.0646 14.5256C19.2505 14.0055 19.775 13.6568 20.3153 13.7713L21.2935 13.9787C21.8338 14.0932 22.1836 14.6262 22.0179 15.1531C20.6787 19.4112 16.7016 22.5 12 22.5C6.20101 22.5 1.5 17.799 1.5 12C1.5 6.20101 6.20101 1.5 12 1.5C14.7835 1.5 16.9516 2.76847 18.5112 4.0746L20.2929 2.29289C20.5789 2.00689 21.009 1.92134 21.3827 2.07612C21.7564 2.2309 22 2.59554 22 3V8.5C22 9.05228 21.5523 9.5 21 9.5H15.5C15.0956 9.5 14.7309 9.25636 14.5761 8.88268C14.4214 8.50901 14.5069 8.07889 14.7929 7.79289L16.3788 6.20698Z" fill="#000"/>
-                                        </svg>
-                                    </button>
-                                </h6>
-                                <h4 class="card-text" id="unrealizedPnl">-</h4>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-md-3">
-                        <div class="card bg-light">
-                            <div class="card-body">
-                                <h6 class="card-title">总累计盈亏</h6>
-                                <h4 class="card-text" id="totalPnl">-</h4>
-                            </div>
-                        </div>
-                    </div>
+                </div>
+
+                <div class="bg-blue-50 p-4 rounded-lg">
+                    <h6 class="text-lg font-semibold text-blue-900 mb-2">策略分析說明：</h6>
+                    <ul class="space-y-2 text-blue-800">
+                        <li><strong>RRR (風險報酬比)</strong>：衡量每筆交易的風險與潛在回報的比例。建議維持在 2:1 以上。</li>
+                        <li><strong>P/L 比率</strong>：平均盈利與平均虧損的比值。大於 1 表示策略整體獲利。</li>
+                        <li><strong>Kelly 值</strong>：根據勝率和盈虧比計算的最優資金分配比例。建議不超過 20%。</li>
+                        <li><strong>策略健康度</strong>：綜合評估策略的風險與回報平衡性。</li>
+                    </ul>
                 </div>
             </div>
         </div>
+    </div>
 
-    <div class="modal fade" id="favoriteModal" tabindex="-1" aria-labelledby="favoriteModalLabel" aria-hidden="true">
-      <div class="modal-dialog">
-        <div class="modal-content">
-          <div class="modal-header">
-            <h5 class="modal-title" id="favoriteModalLabel">收藏地址</h5>
-            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-          </div>
-          <div class="modal-body">
-            <div class="mb-3">
-              <label for="favoriteTag" class="form-label">標籤</label>
-              <input type="text" class="form-control" id="favoriteTag" placeholder="輸入標籤">
+    <!-- 收藏地址模態框 -->
+    <div class="modal hidden fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full" id="favoriteModal">
+        <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-medium text-gray-900">收藏地址</h3>
+                <button type="button" class="text-gray-400 hover:text-gray-500" data-bs-dismiss="modal">
+                    <span class="sr-only">關閉</span>
+                    <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
             </div>
-          </div>
-          <div class="modal-footer">
-            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
-            <button type="button" class="btn btn-primary" id="favoriteSaveBtn">確認收藏</button>
-          </div>
+            <div class="mb-4">
+                <label for="favoriteTag" class="block text-sm font-medium text-gray-700 mb-2">標籤</label>
+                <input type="text" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500" id="favoriteTag" placeholder="輸入標籤">
+            </div>
+            <div class="flex justify-end space-x-3">
+                <button type="button" class="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2" id="favoriteSaveBtn">確認收藏</button>
+            </div>
         </div>
-      </div>
     </div>
 
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
@@ -367,7 +416,10 @@
             'W': 'wormhole',     
             'POPCAT': 'popcat',  
             'SUI': 'sui',
-            'JUP': 'jupiter-exchange-solana'
+            'JUP': 'jupiter-exchange-solana',
+            'ENA': 'ethena',
+            'MKR': 'maker',
+            'FARTCOIN': 'fartcoin'
         };
 
         function getTradeColor(action, closedPnl) {
@@ -603,6 +655,8 @@
                     $('#accountSummary').html(renderAccountSummary(data)).show();
                     renderPositionsTable(data.assetPositions);
                     $('#positionsTableContainer').show();
+                    // 查詢完資產後，同時查詢盈虧資訊
+                    updatePnlTracking(address);
                   });
             });
 
@@ -615,9 +669,26 @@
                     { data: 'timestamp', render: function(data) { return data; } },
                     { data: 'coin' },
                     { data: 'action' },
-                    { data: 'sz' },
-                    { data: 'px' },
-                    { data: 'closedPnl' },
+                    { 
+                        data: 'sz',
+                        render: function(data) {
+                            return formatCurrency(data, 2);
+                        }
+                    },
+                    { 
+                        data: 'px',
+                        render: function(data) {
+                            return formatCurrency(data, 2);
+                        }
+                    },
+                    { 
+                        data: 'closedPnl',
+                        render: function(data) {
+                            const val = Number(data);
+                            const color = val >= 0 ? 'text-green-600 font-bold' : 'text-red-600 font-bold';
+                            return `<span class="${color}">${formatCurrency(val, 2)}</span>`;
+                        }
+                    },
                     { data: 'count', title: '合併筆數' }
                 ]
             });
@@ -676,22 +747,83 @@
                     $('#overallWinrate').text(lastPnlData.overall_stats.overall_winrate.toFixed(2) + '%');
                     $('#totalTrades').text(lastPnlData.overall_stats.total_trades);
                     $('#winningTrades').text(lastPnlData.overall_stats.winning_trades);
+                    
+                    // 更新策略分析指標
+                    $('#strategyAnalysisStats').show();
+                    $('#avgRrr').text(lastPnlData.overall_stats.avg_rrr?.toFixed(2) || '-');
+                    $('#plRatio').text(lastPnlData.overall_stats.pl_ratio?.toFixed(2) || '-');
+                    $('#kellyValue').text(lastPnlData.overall_stats.kelly ? lastPnlData.overall_stats.kelly + '%' : '-');
+                    
+                    // 計算策略健康度
+                    const health = calculateStrategyHealth(
+                        lastPnlData.overall_stats.overall_winrate,
+                        lastPnlData.overall_stats.avg_rrr,
+                        lastPnlData.overall_stats.pl_ratio,
+                        lastPnlData.overall_stats.kelly
+                    );
+                    $('#strategyHealth').text(health.rating)
+                        .removeClass('text-success text-warning text-danger')
+                        .addClass(health.class);
                 }
+            }
+            function calculateStrategyHealth(winrate, rrr, plRatio, kelly) {
+                let score = 0;
+                let rating = '';
+                let className = '';
+                
+                // 評估勝率
+                if (winrate >= 60) score += 3;
+                else if (winrate >= 50) score += 2;
+                else if (winrate >= 40) score += 1;
+                
+                // 評估 RRR
+                if (rrr >= 3) score += 3;
+                else if (rrr >= 2) score += 2;
+                else if (rrr >= 1.5) score += 1;
+                
+                // 評估 P/L 比率
+                if (plRatio >= 2) score += 3;
+                else if (plRatio >= 1.5) score += 2;
+                else if (plRatio >= 1) score += 1;
+                
+                // 評估 Kelly 值
+                if (kelly && kelly <= 20) score += 3;
+                else if (kelly && kelly <= 30) score += 2;
+                else if (kelly && kelly <= 40) score += 1;
+                
+                // 根據總分給出評級
+                if (score >= 10) {
+                    rating = '優秀';
+                    className = 'text-success';
+                } else if (score >= 7) {
+                    rating = '良好';
+                    className = 'text-success';
+                } else if (score >= 5) {
+                    rating = '一般';
+                    className = 'text-warning';
+                } else {
+                    rating = '需改進';
+                    className = 'text-danger';
+                }
+                
+                return { rating, class: className };
             }
             function renderPnlSummaryTable(data) {
                 const tbody = $('#pnlSummaryTable tbody');
                 tbody.empty();
                 if (!data || data.length === 0) {
-                    tbody.append('<tr><td colspan="4" class="text-center">No data</td></tr>');
+                    tbody.append('<tr><td colspan="6" class="text-center">No data</td></tr>');
                     return;
                 }
                 data.forEach(row => {
+                    const pnl = Number(row.sum_netPnl);
                     tbody.append(`
                         <tr>
                             <td>${row.date}</td>
                             <td>${row.num_trades}</td>
                             <td>${row.winrate}</td>
                             <td>${Array.isArray(row.coins_traded) ? row.coins_traded.join(', ') : ''}</td>
+                            <td class="${pnl >= 0 ? 'text-green-600 font-bold' : 'text-red-600 font-bold'}">${formatCurrency(pnl, 2)}</td>
                         </tr>
                     `);
                 });
@@ -859,7 +991,7 @@
                 }
                 // 只計算已平倉單（closedPnl 不為 0）
                 const closedTrades = lastTradeHistory.filter(t => t.closedPnl !== undefined && t.closedPnl !== null && Number(t.closedPnl) !== 0);
-                const winTrades = closedTrades.filter(t => Number(t.closedPnl) > 0).length;
+                const winTrades = closedTrades.filter(t => Number(t.netPnl) > 0).length;
                 const winrate = closedTrades.length > 0 ? (winTrades / closedTrades.length) * 100 : 0;
                 // 前5常交易幣種
                 const coinCount = {};
@@ -872,9 +1004,9 @@
                 const profitList = lastTradeHistory.map(t => {
                     const sz = Number(t.sz);
                     const px = Number(t.px);
-                    const closedPnl = Number(t.closedPnl);
+                    const netPnl = Number(t.netPnl);
                     const cost = Math.abs(sz * px);
-                    const profitPct = cost > 0 ? (closedPnl / cost) * 100 : 0;
+                    const profitPct = cost > 0 ? (netPnl / cost) * 100 : 0;
                     return profitPct;
                 }).sort((a,b)=>b-a).slice(0,5);
                 // 發送到後端
@@ -916,6 +1048,9 @@
                     if (sortKey === 'timestamp') {
                         return new Date(b.timestamp) - new Date(a.timestamp);
                     }
+                    if (sortKey === 'netPnl') {
+                        return Number(b.netPnl) - Number(a.netPnl);
+                    }
                     return Number(b[sortKey]) - Number(a[sortKey]);
                 });
                 renderTradeHistoryTable(filtered);
@@ -943,6 +1078,24 @@
                         $('#tradeHistoryForm').submit();
                     }
                 });
+                // 新增：Cumulative PnL Over Time 收藏下拉選單
+                $('#pnlFavoriteDropdown').on('change', function() {
+                    const addr = $(this).val();
+                    if (addr) {
+                        $('#pnlWalletAddress').val(addr);
+                    }
+                });
+                // 載入收藏地址到 PnL 區塊
+                fetch('/api/favorite_addresses')
+                  .then(res => res.json())
+                  .then(data => {
+                    const dropdown = $('#pnlFavoriteDropdown');
+                    dropdown.empty();
+                    dropdown.append('<option value="">選擇收藏地址（依標籤）</option>');
+                    data.forEach(item => {
+                      dropdown.append(`<option value="${item.address}">${item.tag} (${item.address})</option>`);
+                    });
+                  });
             });
 
             $('#trackPnlForm').on('submit', function(e) {
@@ -959,6 +1112,25 @@
                 }
                 // 立即获取一次数据
                 updatePnlTracking(address);
+                // 新增：查詢策略分析指標
+                fetch(`/api/pnl_timeseries?address=${address}`)
+                  .then(res => res.json())
+                  .then(data => {
+                    if (!data || !data.overall_stats) return;
+                    $('#strategyAnalysisStats').show();
+                    $('#avgRrr').text(data.overall_stats.avg_rrr?.toFixed(2) || '-');
+                    $('#plRatio').text(data.overall_stats.pl_ratio?.toFixed(2) || '-');
+                    $('#kellyValue').text(data.overall_stats.kelly ? data.overall_stats.kelly + '%' : '-');
+                    const health = calculateStrategyHealth(
+                      data.overall_stats.overall_winrate,
+                      data.overall_stats.avg_rrr,
+                      data.overall_stats.pl_ratio,
+                      data.overall_stats.kelly
+                    );
+                    $('#strategyHealth').text(health.rating)
+                      .removeClass('text-success text-warning text-danger')
+                      .addClass(health.class);
+                  });
                 // 设置主體每30秒更新
                 pnlTrackingInterval = setInterval(() => {
                     updatePnlTracking(address);
@@ -984,7 +1156,8 @@
                     .then(res => res.json())
                     .then(data => {
                         if (data.error) {
-                            alert(data.error);
+                            // 可選：顯示錯誤
+                            $('#pnlTrackingStats').hide();
                             return;
                         }
                         
@@ -992,12 +1165,12 @@
                         $('#realizedPnl').text(formatCurrency(data.realized_pnl));
                         $('#fundingPnl').text(formatCurrency(data.funding_pnl));
                         $('#unrealizedPnl').text(formatCurrency(data.unrealized_pnl));
-                        $('#totalPnl').text(formatCurrency(data.total_cumulative_pnl));
+                        $('#totalCumulativePnl').text(formatCurrency(data.total_cumulative_pnl));
                         
                         // 根据盈亏设置颜色
                         const totalPnl = data.total_cumulative_pnl;
-                        $('#totalPnl').removeClass('text-success text-danger')
-                            .addClass(totalPnl >= 0 ? 'text-success' : 'text-danger');
+                        $('#totalCumulativePnl').removeClass('text-green-600 text-red-600')
+                            .addClass(totalPnl >= 0 ? 'text-green-600' : 'text-red-600');
                     })
                     .catch(error => {
                         console.error('Error fetching PnL data:', error);
@@ -1012,6 +1185,7 @@
                             return;
                         }
                         $('#unrealizedPnl').text(formatCurrency(data.unrealized_pnl));
+                        $('#totalCumulativePnl').text(formatCurrency(data.total_cumulative_pnl));
                     })
                     .finally(() => {
                         if (cb) cb();
@@ -1021,7 +1195,7 @@
 
         function formatCurrency(val, digits=2) {
             if (val === null || val === undefined) return '-';
-            return Number(val).toLocaleString(undefined, {maximumFractionDigits: digits});
+            return Number(val).toLocaleString(undefined, {maximumFractionDigits: digits, minimumFractionDigits: digits});
         }
         function formatPercent(val, digits=2) {
             if (val === null || val === undefined) return '-';
@@ -1056,12 +1230,12 @@
                 tbody.append(`
                     <tr>
                         <td><strong>${p.coin}</strong></td>
-                        <td>${formatCurrency(p.entryPx, 6)}</td>
+                        <td>${formatCurrency(p.entryPx, 2)}</td>
                         <td>${p.leverage?.type ? p.leverage.type.charAt(0).toUpperCase() + p.leverage.type.slice(1) : ''} x${p.leverage?.value || ''}</td>
                         <td>$${formatCurrency(p.positionValue)}</td>
                         <td>$${formatCurrency(p.marginUsed)}</td>
-                        <td>${formatCurrency(p.szi, 4)}</td>
-                        <td class="${Number(p.unrealizedPnl) >= 0 ? 'text-success' : 'text-danger'}">$${formatCurrency(p.unrealizedPnl)}</td>
+                        <td>${formatCurrency(p.szi, 2)}</td>
+                        <td class="${Number(p.unrealizedPnl) >= 0 ? 'text-green-600 font-bold' : 'text-red-600 font-bold'}">$${formatCurrency(p.unrealizedPnl)}</td>
                         <td>${formatPercent(p.returnOnEquity, 2)}</td>
                         <td>
                             <span title="All Time">${formatCurrency(p.cumFunding?.allTime, 6)}</span> /
@@ -1072,6 +1246,25 @@
                 `);
             });
         }
+
+        // 夜間模式切換腳本
+        document.addEventListener('DOMContentLoaded', function() {
+            const btn = document.getElementById('toggleDarkBtn');
+            btn.onclick = function() {
+                const html = document.documentElement;
+                if (html.classList.contains('dark')) {
+                    html.classList.remove('dark');
+                    localStorage.setItem('theme', 'light');
+                } else {
+                    html.classList.add('dark');
+                    localStorage.setItem('theme', 'dark');
+                }
+            };
+            // 頁面載入時自動套用上次選擇
+            if (localStorage.getItem('theme') === 'dark') {
+                document.documentElement.classList.add('dark');
+            }
+        });
     </script>
 </body>
 </html> 
