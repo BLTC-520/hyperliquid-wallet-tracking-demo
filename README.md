@@ -1,77 +1,156 @@
 # Hyperliquid Wallet Tracker
 
-這是一個用於追蹤 Hyperliquid 錢包交易的工具，提供即時和歷史交易數據分析。
+A comprehensive tool for tracking and analyzing Hyperliquid wallet trades with real-time and historical trade data analysis.
 
-## 功能特點
+## Features
 
-- 即時追蹤交易
-- 資產倉位和賬戶摘要
-- 交易歷史查詢
-- 累計盈虧分析
-- 實時盈虧追蹤
-- 收藏地址管理
-- 幣價歷史走勢圖
-- 交易篩選和排序
+### Account Overview
+- Account total value display
+- Withdrawable balance
+- Total margin usage
+- Total position value
+- Current position details with entry prices, leverage, and ROE
 
-## 設置
+### Trade History
+- Query trades by wallet address
+- Filter by date range
+- Filter by coin and trade size
+- Sort by timestamp, size, price, or PnL
+- View merged trades by hour
+- Save favorite wallet addresses with tags
+- Cryptocurrency price history charts with trade point markers
 
-1. 創建虛擬環境（推薦）：
+### PnL Analysis
+- Cumulative PnL charts with timeframe selection
+- Winrate statistics by day
+- Trade count visualization
+- Realized/unrealized PnL tracking
+- Real-time PnL updates
+- Funding rate PnL tracking
+
+### Strategy Analysis
+- Average Risk-Reward Ratio (RRR) calculation
+- Profit/Loss ratio display
+- Kelly criterion value
+- Strategy health assessment
+- Performance metrics and recommendations
+
+### UI/UX Features
+- Dark mode toggle
+- Responsive design
+- Real-time data updates via WebSockets
+- Pagination for large datasets
+- Interactive charts
+- Automated data refresh
+
+## Setup
+
+1. Create a virtual environment (recommended):
 ```bash
 python -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
 ```
 
-2. 安裝依賴：
+2. Install dependencies:
 ```bash
 pip install -r requirements.txt
 ```
 
-3. 創建 `.env` 文件（可選）：
-```bash
-WALLET_ADDRESS=your_wallet_address_here
+3. Create a `.env` file with necessary configuration:
+```
+COINGECKO_API_KEY=your_coingecko_api_key
+DB_NAME=wallet_tracker
+DB_USER=postgres
+DB_PASSWORD=your_db_password
+DB_HOST=localhost
+DB_PORT=5432
 ```
 
-## 使用方法
+## Database Setup
 
-運行服務器：
+The application requires a PostgreSQL database with the following table:
+
+```sql
+CREATE TABLE favorite_addresses (
+    id SERIAL PRIMARY KEY,
+    address VARCHAR(255) NOT NULL,
+    winrate NUMERIC,
+    tag VARCHAR(255),
+    top_coins JSON,
+    top_profits JSON
+);
+```
+
+## Usage
+
+Run the server:
 ```bash
 python app.py
 ```
 
-訪問 http://localhost:5000 使用網頁界面。
+Access the web interface at http://localhost:8080
 
-## 主要功能說明
+## API Endpoints
 
-### 資產倉位和賬戶摘要
-- 顯示賬戶總價值
-- 可提現金額
-- 總保證金使用量
-- 總倉位價值
-- 當前持倉詳情
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/user_state` | GET | Get account state and positions |
+| `/api/trades_by_address` | GET | Get trade history for a specific address |
+| `/api/pnl_timeseries` | GET | Get PnL time series data |
+| `/api/favorite_address` | POST | Save a wallet address as favorite |
+| `/api/favorite_addresses` | GET | Get all favorite addresses |
+| `/api/track_pnl` | GET | Get real-time PnL data |
+| `/api/coin_price_history` | GET | Get historical price data for a coin |
 
-### 交易歷史查詢
-- 按時間範圍查詢
-- 按幣種篩選
-- 按交易大小篩選
-- 多種排序方式
-- 收藏常用地址
+## Main Components
 
-### 盈虧分析
-- 累計盈虧圖表
-- 勝率統計
-- 交易數量統計
-- 實時盈虧追蹤
-- 已實現/未實現盈虧
+### Asset Positions and Account Summary
+- Display account total value
+- Withdrawable amount
+- Total margin usage
+- Total position value
+- Current position details with entry prices, leverage, and PnL
 
-### 其他功能
-- 幣價歷史走勢圖
-- 交易點位標記
-- 自動更新數據
-- 響應式設計
+### Trade History Query
+- Query by time range
+- Filter by coin
+- Filter by trade size
+- Multiple sort options
+- Favorites management
+- Merged trade view by hour
 
-## 注意事項
+### PnL Analysis
+- Cumulative PnL charts
+- Winrate statistics
+- Trade count statistics
+- Real-time PnL tracking
+- Realized/unrealized PnL breakdown
+- 7-day, 30-day, and 90-day summaries
 
-- 使用 Hyperliquid 的 WebSocket API 進行即時更新
-- 自動重連機制
-- 數據緩存避免重複通知
-- 支持多種加密貨幣交易對 
+### Strategy Analysis
+- Average RRR (Risk-Reward Ratio)
+- P/L ratio calculation
+- Kelly criterion value
+- Strategy health assessment with ratings
+
+### Price Charts
+- Historical price charts
+- Trade entry/exit points visualization
+- Interactive tooltips
+- Timeframe selection
+
+## Technologies Used
+
+- Backend: Python Flask with SocketIO
+- Frontend: HTML/CSS/JavaScript with Tailwind CSS
+- Database: PostgreSQL
+- APIs: Hyperliquid WebSocket API, CoinGecko API
+- Charts: Chart.js
+- Real-time updates: WebSockets
+
+## Notes
+
+- Uses Hyperliquid's WebSocket API for real-time updates
+- Automatic reconnection mechanism
+- Data caching to avoid duplicate notifications
+- Supports multiple cryptocurrency trading pairs
